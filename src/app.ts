@@ -27,11 +27,15 @@ const corsOptions: CorsOptions = {
   // Allow requests from any origin (no URL restriction).
   origin: true,
   credentials: true,
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  optionsSuccessStatus: 204,
 };
 
 // Middlewares
 app.use(helmet());
 app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
