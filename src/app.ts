@@ -1,5 +1,5 @@
 import express from "express";
-import cors from "cors";
+import cors, { type CorsOptions } from "cors";
 import helmet from "helmet";
 
 import cookieParser from "cookie-parser";
@@ -22,17 +22,16 @@ import errorLogRoutes from "./routes/errorLogRoutes";
 
 const app = express();
 
+const isProd = process.env.NODE_ENV === "production";
+const corsOptions: CorsOptions = {
+  // Allow requests from any origin (no URL restriction).
+  origin: true,
+  credentials: true,
+};
+
 // Middlewares
 app.use(helmet());
-app.use(
-  cors({
-    origin:
-      process.env.NODE_ENV === "production"
-        ? process.env.FRONTEND_URL
-        : "http://localhost:5173",
-    credentials: true,
-  }),
-);
+app.use(cors(corsOptions));
 app.use(express.json());
 app.use(cookieParser());
 
