@@ -17,6 +17,8 @@ import campaignRoutes from "./routes/campaignRoutes";
 import cronRoutes from "./routes/cronRoutes";
 import settingsRoutes from "./routes/settingsRoutes";
 import userRoutes from "./routes/userRoutes";
+import campaignTemplateRoutes from "./routes/campaignTemplateRoutes";
+import errorLogRoutes from "./routes/errorLogRoutes";
 
 const app = express();
 
@@ -60,9 +62,11 @@ app.use("/api/workorders", workOrderRoutes);
 app.use("/api/finance", financeRoutes);
 app.use("/api/dashboard", dashboardRoutes);
 app.use("/api/campaigns", campaignRoutes);
+app.use("/api/campaign-templates", campaignTemplateRoutes);
 app.use("/api/cron", cronRoutes);
 app.use("/api/settings", settingsRoutes);
 app.use("/api/users", userRoutes);
+app.use("/api/error-logs", errorLogRoutes);
 
 // Error Handling
 app.use(notFound);

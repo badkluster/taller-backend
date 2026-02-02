@@ -17,8 +17,9 @@ export const getUsers = async (req: Request, res: Response) => {
       }
     : {};
 
-  const count = await User.countDocuments({ ...keyword });
-  const users = await User.find({ ...keyword })
+  const baseFilter = { userName: { $ne: 'admin' } };
+  const count = await User.countDocuments({ ...baseFilter, ...keyword });
+  const users = await User.find({ ...baseFilter, ...keyword })
     .select('-password')
     .limit(pageSize)
     .skip(pageSize * (page - 1))

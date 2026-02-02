@@ -5,6 +5,11 @@ const emailCampaignSchema = new mongoose.Schema(
     title: { type: String, required: true },
     subject: { type: String, required: true },
     body: { type: String, required: true }, // HTML content
+    template: { type: String },
+    target: { type: String, default: 'all' },
+    status: { type: String, enum: ['DRAFT', 'SENT'], default: 'DRAFT' },
+    sentCount: { type: Number, default: 0 },
+    sentAt: { type: Date },
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: "User" },
     stats: {
       sent: { type: Number, default: 0 },

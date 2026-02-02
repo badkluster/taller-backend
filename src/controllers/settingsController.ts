@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
 import Settings from "../models/Settings";
+import { processMaintenanceReminders } from "../utils/cronProcessor";
+import WorkOrder from "../models/WorkOrder";
 
 // @desc    Get settings
 // @route   GET /api/settings
@@ -56,4 +58,41 @@ export const updateSettings = async (req: Request, res: Response) => {
   } catch (error: any) {
     res.status(400).json({ message: error.message });
   }
+};
+
+// @desc    Run maintenance reminders manually
+// @route   POST /api/settings/maintenance-reminders/run
+// @access  Private/Admin
+export const runMaintenanceReminders = async (req: Request, res: Response) => {
+  try {
+    const results = await processMaintenanceReminders();
+    res.json({ success: true, results });
+  } catch (error: any) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// @desc    Get maintenance reminders status for today
+// @route   GET /api/settings/maintenance-reminders/status
+// @access  Private/Admin
+export const getMaintenanceRemindersStatus = async (req: Request, res: Response) => {
+  const now = new Date();
+  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const endOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+
+  const dueCount = await WorkOrder.countDocuments({
+    maintenanceNotice: true,
+    maintenanceDate: { $gte: startOfToday, $lte: endOfToday },
+    $or: [
+      { maintenanceLastNotifiedAt: { $exists: false } },
+      { maintenanceLastNotifiedAt: { $lt: startOfToday } },
+    ],
+  });
+
+  const sentToday = await WorkOrder.countDocuments({
+    maintenanceNotice: true,
+    maintenanceLastNotifiedAt: { $gte: startOfToday, $lte: endOfToday },
+  });
+
+  res.json({ dueCount, sentToday });
 };

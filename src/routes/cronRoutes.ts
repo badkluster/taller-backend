@@ -1,5 +1,5 @@
 import express from 'express';
-import { processReminders, rescheduleOverdueAppointments } from '../utils/cronProcessor';
+import { processMaintenanceReminders, processReminders, rescheduleOverdueAppointments } from '../utils/cronProcessor';
 
 const router = express.Router();
 
@@ -30,6 +30,21 @@ router.get('/reschedule-overdue-appointments', async (req, res) => {
 
   try {
     const results = await rescheduleOverdueAppointments();
+    res.json({ success: true, results });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/maintenance-reminders', async (req, res) => {
+  const secret = req.headers['authorization'];
+  if (secret !== `Bearer ${process.env.CRON_SECRET}`) {
+    res.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const results = await processMaintenanceReminders();
     res.json({ success: true, results });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

@@ -2,6 +2,7 @@ import ReminderJob from '../models/ReminderJob';
 import Appointment from '../models/Appointment';
 import Client from '../models/Client';
 import WorkOrder from '../models/WorkOrder';
+import { sendEmail } from './mailer';
 // import { sendWhatsApp, sendEmail } from '../utils/communications'; // TODO
 
 const DEFAULT_TIME_SLOTS = [
@@ -157,6 +158,65 @@ export const rescheduleOverdueAppointments = async () => {
     await appointment.save();
 
     results.rescheduled += 1;
+  }
+
+  return results;
+};
+
+export const processMaintenanceReminders = async () => {
+  const now = new Date();
+  const startOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const endOfToday = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 23, 59, 59, 999));
+
+  const workOrders = await WorkOrder.find({
+    maintenanceNotice: true,
+    maintenanceDate: { $gte: startOfToday, $lte: endOfToday },
+    $or: [
+      { maintenanceLastNotifiedAt: { $exists: false } },
+      { maintenanceLastNotifiedAt: { $lt: startOfToday } },
+    ],
+  })
+    .populate('clientId')
+    .populate('vehicleId');
+
+  const results = { sent: 0, skipped: 0, failed: 0 };
+
+  for (const wo of workOrders) {
+    try {
+      const client = wo.clientId as any;
+      const vehicle = wo.vehicleId as any;
+      const email = client?.email;
+      if (!email) {
+        results.skipped += 1;
+        continue;
+      }
+
+      const vehicleLabel = [vehicle?.make, vehicle?.model, vehicle?.plateNormalized]
+        .filter(Boolean)
+        .join(' ');
+      const dateLabel = wo.maintenanceDate
+        ? new Date(wo.maintenanceDate).toLocaleDateString()
+        : 'próximamente';
+
+      const subject = `Aviso de mantenimiento${vehicleLabel ? ` - ${vehicleLabel}` : ''}`;
+      const html = `
+        <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+          <h2 style="margin: 0 0 12px;">Aviso de mantenimiento</h2>
+          <p>Hola ${client?.firstName || ''} ${client?.lastName || ''},</p>
+          <p>Te recordamos el mantenimiento programado para el <strong>${dateLabel}</strong>.</p>
+          ${vehicleLabel ? `<p><strong>Vehículo:</strong> ${vehicleLabel}</p>` : ''}
+          ${wo.maintenanceDetail ? `<p><strong>Detalle:</strong> ${wo.maintenanceDetail}</p>` : ''}
+          <p>Si querés reprogramar, escribinos y te ayudamos.</p>
+        </div>
+      `;
+
+      await sendEmail({ to: email, subject, html });
+      wo.maintenanceLastNotifiedAt = now;
+      await wo.save();
+      results.sent += 1;
+    } catch (error) {
+      results.failed += 1;
+    }
   }
 
   return results;

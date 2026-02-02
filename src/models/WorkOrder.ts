@@ -14,6 +14,7 @@ const workOrderSchema = new mongoose.Schema({
   maintenanceDetail: { type: String },
   maintenanceNotice: { type: Boolean, default: false },
   maintenanceDate: { type: Date },
+  maintenanceLastNotifiedAt: { type: Date },
   workStartedAt: { type: Date },
   startAt: { type: Date },
   endAt: { type: Date },

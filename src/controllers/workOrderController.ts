@@ -53,12 +53,27 @@ const deleteCloudinaryAsset = async (url?: string) => {
 export const getWorkOrders = async (req: Request, res: Response) => {
   const pageSize = Number(req.query.pageSize) || 10;
   const page = Number(req.query.pageNumber) || 1;
-  const { vehicleId, status, appointmentId, keyword } = req.query;
+  const { vehicleId, status, appointmentId, keyword, startDate, endDate } = req.query;
 
   const query: any = {};
   if (vehicleId) query.vehicleId = vehicleId;
   if (status) query.status = status;
   if (appointmentId) query.appointmentId = appointmentId;
+  if (startDate || endDate) {
+    const start = startDate ? new Date(String(startDate)) : null;
+    const end = endDate ? new Date(String(endDate)) : null;
+    if (start && !Number.isNaN(start.getTime())) {
+      start.setHours(0, 0, 0, 0);
+    }
+    if (end && !Number.isNaN(end.getTime())) {
+      end.setHours(23, 59, 59, 999);
+    }
+    if (start || end) {
+      query.createdAt = {};
+      if (start && !Number.isNaN(start.getTime())) query.createdAt.$gte = start;
+      if (end && !Number.isNaN(end.getTime())) query.createdAt.$lte = end;
+    }
+  }
 
   if (keyword) {
     const term = String(keyword);
