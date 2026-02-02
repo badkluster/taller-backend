@@ -1,14 +1,17 @@
 import { Request, Response } from 'express';
 import Vehicle from '../models/Vehicle';
 import Client from '../models/Client';
+import Appointment from '../models/Appointment';
+import WorkOrder from '../models/WorkOrder';
 import { normalizePlate } from '../utils/normalizePlate';
 
 // @desc    Get all vehicles with pagination and search
 // @route   GET /api/vehicles
 // @access  Private
 export const getVehicles = async (req: Request, res: Response) => {
-  const pageSize = 10;
+  const pageSize = Number(req.query.pageSize) || 10;
   const page = Number(req.query.pageNumber) || 1;
+  const clientId = req.query.clientId as string | undefined;
   const keyword = req.query.keyword
     ? {
         $or: [
@@ -19,13 +22,16 @@ export const getVehicles = async (req: Request, res: Response) => {
       }
     : {};
 
-  const count = await Vehicle.countDocuments({ ...keyword });
-  const vehicles = await Vehicle.find({ ...keyword })
+  const query: any = { ...keyword };
+  if (clientId) query.currentOwner = clientId;
+
+  const count = await Vehicle.countDocuments(query);
+  const vehicles = await Vehicle.find(query)
     .populate('currentOwner', 'firstName lastName')
     .limit(pageSize)
     .skip(pageSize * (page - 1));
 
-  res.json({ vehicles, page, pages: Math.ceil(count / pageSize) });
+  res.json({ vehicles, page, pages: Math.ceil(count / pageSize), totalCount: count });
 };
 
 // @desc    Get vehicle by ID
@@ -100,12 +106,12 @@ export const updateVehicle = async (req: Request, res: Response) => {
   const vehicle = await Vehicle.findById(req.params.id);
 
   if (vehicle) {
-    vehicle.make = make || vehicle.make;
-    vehicle.model = model || vehicle.model;
-    vehicle.year = year || vehicle.year;
-    vehicle.color = color || vehicle.color;
-    vehicle.km = km || vehicle.km;
-    if (plateRaw) {
+    if (make !== undefined) vehicle.make = make;
+    if (model !== undefined) vehicle.model = model;
+    if (year !== undefined) vehicle.year = year;
+    if (color !== undefined) vehicle.color = color;
+    if (km !== undefined) vehicle.km = km;
+    if (plateRaw !== undefined && plateRaw !== '') {
       vehicle.plateRaw = plateRaw;
       vehicle.plateNormalized = normalizePlate(plateRaw as string);
     } // Creating a new plate is risky if conflict, but mongo index will catch it
@@ -148,4 +154,25 @@ export const changeVehicleOwner = async (req: Request, res: Response) => {
 
   await vehicle.save();
   res.json(vehicle);
+};
+
+// @desc    Delete a vehicle
+// @route   DELETE /api/vehicles/:id
+// @access  Private
+export const deleteVehicle = async (req: Request, res: Response) => {
+  const vehicle = await Vehicle.findById(req.params.id);
+
+  if (vehicle) {
+    const hasAppointments = await Appointment.exists({ vehicleId: vehicle._id });
+    const hasWorkOrders = await WorkOrder.exists({ vehicleId: vehicle._id });
+    if (hasAppointments || hasWorkOrders) {
+      res.status(400);
+      throw new Error('No se puede eliminar: el vehículo tiene turnos u órdenes asociadas');
+    }
+    await vehicle.deleteOne();
+    res.json({ message: 'Vehículo eliminado' });
+  } else {
+    res.status(404);
+    throw new Error('Vehículo no encontrado');
+  }
 };

@@ -41,6 +41,7 @@ const importData = async () => {
 
     const adminUser = await User.create({
       name: 'Admin User',
+      userName: 'admin',
       email: 'admin@planb.com',
       password: 'adminpassword',
       role: 'admin',
@@ -48,6 +49,7 @@ const importData = async () => {
 
     const mechanicUser = await User.create({
       name: 'Juan Mecanico',
+      userName: 'juan',
       email: 'juan@planb.com',
       password: 'juanpassword',
       role: 'employee',

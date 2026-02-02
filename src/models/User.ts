@@ -3,15 +3,19 @@ import bcrypt from 'bcryptjs';
 
 export interface IUser extends Document {
   name: string;
+  userName?: string;
   email: string;
   password: string;
   role: 'admin' | 'employee';
   isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
   matchPassword: (enteredPassword: string) => Promise<boolean>;
 }
 
 const userSchema = new mongoose.Schema({
   name: { type: String, required: true },
+  userName: { type: String, unique: true, sparse: true, trim: true, lowercase: true },
   email: { type: String, required: true, unique: true },
   password: { type: String, required: true },
   role: { type: String, enum: ['admin', 'employee'], default: 'employee' },

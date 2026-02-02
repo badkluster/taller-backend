@@ -6,9 +6,17 @@ import generateToken from '../utils/generateToken';
 // @route   POST /api/auth/login
 // @access  Public
 export const loginUser = async (req: Request, res: Response) => {
-  const { email, password } = req.body;
+  const { email, userName, identifier, password } = req.body;
+  const loginValue = (identifier || email || userName || '').toString().trim().toLowerCase();
 
-  const user = await User.findOne({ email });
+  if (!loginValue || !password) {
+    res.status(400);
+    throw new Error('Usuario y contraseña son obligatorios');
+  }
+
+  const user = await User.findOne({
+    $or: [{ email: loginValue }, { userName: loginValue }],
+  });
 
   if (user && (await user.matchPassword(password))) {
     if (!user.isActive) {
@@ -21,12 +29,13 @@ export const loginUser = async (req: Request, res: Response) => {
     res.json({
       _id: user._id,
       name: user.name,
+      userName: user.userName,
       email: user.email,
       role: user.role,
     });
   } else {
     res.status(401);
-    throw new Error('Email o contraseña inválidos');
+    throw new Error('Usuario o contraseña inválidos');
   }
 };
 
@@ -52,6 +61,7 @@ export const getUserProfile = async (req: Request, res: Response) => {
   const user = {
     _id: req.user._id,
     name: req.user.name,
+    userName: req.user.userName,
     email: req.user.email,
     role: req.user.role,
   };

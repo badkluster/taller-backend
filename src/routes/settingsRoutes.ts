@@ -8,4 +8,8 @@ router.route('/')
   .get(protect, getSettings)
   .put(protect, admin, updateSettings);
 
+// Public settings for landing page
+router.route('/public')
+  .get(getSettings);
+
 export default router;

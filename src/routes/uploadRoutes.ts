@@ -4,6 +4,6 @@ import { protect } from '../middlewares/authMiddleware';
 
 const router = express.Router();
 
-router.post('/', protect as any, upload.single('image'), uploadImage as any);
+router.post('/', protect as any, upload.any(), uploadImage as any);
 
 export default router;

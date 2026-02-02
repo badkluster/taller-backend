@@ -8,6 +8,14 @@ const estimateSchema = new mongoose.Schema({
   number: { type: String, required: true }, // e.g., "P-0001"
   pdfUrl: { type: String },
   status: { type: String, enum: ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED'], default: 'DRAFT' },
+  items: [{
+    description: { type: String },
+    qty: { type: Number },
+    unitPrice: { type: Number },
+    total: { type: Number }
+  }],
+  laborCost: { type: Number, default: 0 },
+  discount: { type: Number, default: 0 },
   total: { type: Number, required: true },
   sentAt: { type: Date },
   channelsUsed: [{ type: String, enum: ['EMAIL', 'WHATSAPP'] }]
@@ -21,6 +29,14 @@ const invoiceSchema = new mongoose.Schema({
   workOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'WorkOrder' },
   number: { type: String, required: true }, // e.g., "A-0001"
   pdfUrl: { type: String },
+  items: [{
+    description: { type: String },
+    qty: { type: Number },
+    unitPrice: { type: Number },
+    total: { type: Number }
+  }],
+  laborCost: { type: Number, default: 0 },
+  discount: { type: Number, default: 0 },
   total: { type: Number, required: true },
   paymentMethod: { type: String, enum: ['CASH', 'TRANSFER', 'CARD', 'OTHER'] },
   issuedAt: { type: Date, default: Date.now },

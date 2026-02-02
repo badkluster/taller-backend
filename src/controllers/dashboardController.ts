@@ -24,6 +24,11 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     status: 'NO_SHOW'
   });
 
+  const completedAppointments = await Appointment.countDocuments({
+    startAt: { $gte: startOfMonth, $lte: endOfMonth },
+    status: 'COMPLETED'
+  });
+
   // Calculate monthly revenue from Invoices
   const invoices = await Invoice.find({
     issuedAt: { $gte: startOfMonth, $lte: endOfMonth }
@@ -37,6 +42,7 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     totalAppointments,
     cancelledAppointments,
     noShowAppointments,
+    completedAppointments,
     revenue,
     recentWorkOrders
   });

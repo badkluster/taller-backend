@@ -1,5 +1,5 @@
-import { Request, Response } from 'express';
-import Settings from '../models/Settings';
+import { Request, Response } from "express";
+import Settings from "../models/Settings";
 
 // @desc    Get settings
 // @route   GET /api/settings
@@ -7,18 +7,19 @@ import Settings from '../models/Settings';
 export const getSettings = async (req: Request, res: Response) => {
   try {
     let settings = await Settings.findOne();
-    
+
     if (!settings) {
       // Create default settings if not exists
       settings = await Settings.create({
-        shopName: 'Taller Plan B',
-        address: '',
-        phone: '',
-        emailFrom: '',
-        workingHours: 'Lunes a Viernes 08:00 - 18:00',
+        shopName: "Taller Suarez",
+        address: "",
+        phone: "",
+        emailFrom: "",
+        workingHours: "Lunes a Viernes 09:00 - 20:00",
+        unavailableRanges: [],
       });
     }
-    
+
     res.json(settings);
   } catch (error: any) {
     res.status(500).json({ message: error.message });
@@ -31,16 +32,20 @@ export const getSettings = async (req: Request, res: Response) => {
 export const updateSettings = async (req: Request, res: Response) => {
   try {
     const settings = await Settings.findOne();
-    
+
     if (settings) {
       settings.shopName = req.body.shopName || settings.shopName;
       settings.address = req.body.address || settings.address;
       settings.phone = req.body.phone || settings.phone;
       settings.emailFrom = req.body.emailFrom || settings.emailFrom;
       settings.workingHours = req.body.workingHours || settings.workingHours;
-      settings.invoiceSeriesPrefix = req.body.invoiceSeriesPrefix || settings.invoiceSeriesPrefix;
+      settings.invoiceSeriesPrefix =
+        req.body.invoiceSeriesPrefix || settings.invoiceSeriesPrefix;
       settings.logoUrl = req.body.logoUrl || settings.logoUrl;
-      
+      if (req.body.unavailableRanges !== undefined) {
+        settings.unavailableRanges = req.body.unavailableRanges;
+      }
+
       const updatedSettings = await settings.save();
       res.json(updatedSettings);
     } else {
