@@ -1,3 +1,5 @@
+import { resolveLogoUrl } from './branding';
+
 type ShopSettings = {
   shopName?: string;
   address?: string;
@@ -9,12 +11,23 @@ type ShopSettings = {
 const formatCurrency = (value: number) =>
   new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value);
 
-const baseLayout = (title: string, body: string, settings: ShopSettings) => `
+const baseLayout = (title: string, body: string, settings: ShopSettings) => {
+  const logoUrl = resolveLogoUrl(settings.logoUrl);
+  const logoHtml = logoUrl
+    ? `<img src="${logoUrl}" alt="${settings.shopName || 'Taller Mecánico'}" style="height:40px; max-width:140px; object-fit:contain;" />`
+    : '';
+
+  return `
   <div style="font-family: Arial, sans-serif; background:#f6f7fb; padding:24px;">
     <div style="max-width:640px; margin:0 auto; background:#fff; border-radius:12px; overflow:hidden; border:1px solid #e5e7eb;">
       <div style="padding:20px 24px; background:#0f172a; color:#fff;">
-        <div style="font-size:18px; font-weight:700;">${settings.shopName || 'Taller Mecánico'}</div>
-        <div style="font-size:12px; opacity:.8;">${settings.address || ''}</div>
+        <div style="display:flex; align-items:center; gap:12px;">
+          ${logoHtml}
+          <div>
+            <div style="font-size:18px; font-weight:700;">${settings.shopName || 'Taller Mecánico'}</div>
+            <div style="font-size:12px; opacity:.8;">${settings.address || ''}</div>
+          </div>
+        </div>
       </div>
       <div style="padding:24px;">
         <h2 style="margin:0 0 12px; font-size:20px; color:#0f172a;">${title}</h2>
@@ -27,6 +40,7 @@ const baseLayout = (title: string, body: string, settings: ShopSettings) => `
     </div>
   </div>
 `;
+};
 
 export const appointmentCreatedTemplate = (data: {
   appointmentId: string;

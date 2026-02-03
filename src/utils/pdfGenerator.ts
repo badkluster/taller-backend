@@ -1,4 +1,5 @@
 import PDFDocument from 'pdfkit';
+import { getDefaultLogoBuffer } from './branding';
 
 type PdfItem = { description: string; qty: number; unitPrice: number; total?: number };
 
@@ -21,9 +22,20 @@ const buildDoc = (title: string, meta: { number: string; date: Date; clientName:
   doc.rect(left, 28, width, 70).fill('#0f172a');
 
   // Shop identity
-  doc.fillColor('#ffffff').fontSize(18).text(meta.shopName || 'Taller Mecánico', left + 14, 42, { continued: false });
-  doc.fontSize(9).fillColor('#cbd5f5').text(meta.address || 'Dirección no definida', left + 14, 62);
-  doc.text(meta.phone || 'Teléfono no definido', left + 14, 74);
+  const logo = getDefaultLogoBuffer();
+  const logoWidth = 52;
+  const logoHeight = 52;
+  const logoX = left + 14;
+  const logoY = 34;
+  const textLeft = logo ? logoX + logoWidth + 12 : left + 14;
+
+  if (logo) {
+    doc.image(logo, logoX, logoY, { fit: [logoWidth, logoHeight] });
+  }
+
+  doc.fillColor('#ffffff').fontSize(18).text(meta.shopName || 'Taller Mecánico', textLeft, 42, { continued: false });
+  doc.fontSize(9).fillColor('#cbd5f5').text(meta.address || 'Dirección no definida', textLeft, 62);
+  doc.text(meta.phone || 'Teléfono no definido', textLeft, 74);
 
   // Document info block
   doc.fillColor('#0f172a');

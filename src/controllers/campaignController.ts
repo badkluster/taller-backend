@@ -3,6 +3,7 @@ import { EmailCampaign, EmailLog } from '../models/Campaign';
 import Client from '../models/Client';
 import Settings from '../models/Settings';
 import { sendEmail } from '../utils/mailer';
+import { resolveLogoUrl } from '../utils/branding';
 
 // @desc    Get Campaigns
 // @route   GET /api/campaigns
@@ -51,7 +52,7 @@ export const sendCampaign = async (req: Request, res: Response) => {
 
   const settings = await Settings.findOne();
   const shopName = settings?.shopName || 'Taller';
-  const logoUrl = settings?.logoUrl;
+  const logoUrl = resolveLogoUrl(settings?.logoUrl);
   const address = settings?.address;
   const phone = settings?.phone;
   const emailFrom = settings?.emailFrom;
