@@ -2,6 +2,9 @@ import { Request, Response } from 'express';
 import Appointment from '../models/Appointment';
 import WorkOrder from '../models/WorkOrder';
 import { Invoice } from '../models/Finance';
+import Client from '../models/Client';
+import Vehicle from '../models/Vehicle';
+import { EmailCampaign } from '../models/Campaign';
 
 // @desc    Get Dashboard Summary
 // @route   GET /api/dashboard/summary
@@ -10,29 +13,40 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
   const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0);
 
-  const totalAppointments = await Appointment.countDocuments({
-    startAt: { $gte: startOfMonth, $lte: endOfMonth }
-  });
-
-  const cancelledAppointments = await Appointment.countDocuments({
-    startAt: { $gte: startOfMonth, $lte: endOfMonth },
-    status: 'CANCELLED'
-  });
-
-  const noShowAppointments = await Appointment.countDocuments({
-    startAt: { $gte: startOfMonth, $lte: endOfMonth },
-    status: 'NO_SHOW'
-  });
-
-  const completedAppointments = await Appointment.countDocuments({
-    startAt: { $gte: startOfMonth, $lte: endOfMonth },
-    status: 'COMPLETED'
-  });
+  const [
+    totalAppointments,
+    cancelledAppointments,
+    noShowAppointments,
+    completedAppointments,
+    totalClients,
+    totalVehicles,
+    sentCampaigns,
+    invoices,
+  ] = await Promise.all([
+    Appointment.countDocuments({
+      startAt: { $gte: startOfMonth, $lte: endOfMonth }
+    }),
+    Appointment.countDocuments({
+      startAt: { $gte: startOfMonth, $lte: endOfMonth },
+      status: 'CANCELLED'
+    }),
+    Appointment.countDocuments({
+      startAt: { $gte: startOfMonth, $lte: endOfMonth },
+      status: 'NO_SHOW'
+    }),
+    Appointment.countDocuments({
+      startAt: { $gte: startOfMonth, $lte: endOfMonth },
+      status: 'COMPLETED'
+    }),
+    Client.countDocuments({}),
+    Vehicle.countDocuments({}),
+    EmailCampaign.countDocuments({ status: 'SENT' }),
+    Invoice.find({
+      issuedAt: { $gte: startOfMonth, $lte: endOfMonth }
+    }),
+  ]);
 
   // Calculate monthly revenue from Invoices
-  const invoices = await Invoice.find({
-    issuedAt: { $gte: startOfMonth, $lte: endOfMonth }
-  });
   const revenue = invoices.reduce((acc, inv) => acc + inv.total, 0);
 
   // Recent recent activity
@@ -43,6 +57,9 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     cancelledAppointments,
     noShowAppointments,
     completedAppointments,
+    totalClients,
+    totalVehicles,
+    sentCampaigns,
     revenue,
     recentWorkOrders
   });

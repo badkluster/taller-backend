@@ -1,7 +1,9 @@
 import express from 'express';
 import {
+  cancelPublicPendingAppointmentRequest,
   confirmAppointmentRequest,
   createAppointmentRequest,
+  getPublicPendingAppointmentRequest,
   getPublicVehicleByPlate,
   getAppointmentRequests,
   rejectAppointmentRequest,
@@ -11,6 +13,12 @@ import { admin, protect } from '../middlewares/authMiddleware';
 const router = express.Router();
 
 router.route('/public/plate/:plate').get(getPublicVehicleByPlate as any);
+router
+  .route('/public/pending')
+  .get(getPublicPendingAppointmentRequest as any);
+router
+  .route('/public/cancel')
+  .post(cancelPublicPendingAppointmentRequest as any);
 router.route('/public').post(createAppointmentRequest as any);
 router.route('/').get(protect as any, admin as any, getAppointmentRequests as any);
 router.route('/:id/confirm').post(protect as any, admin as any, confirmAppointmentRequest as any);

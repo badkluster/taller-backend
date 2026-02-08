@@ -7,6 +7,7 @@ import Vehicle from "../models/Vehicle";
 import {
   appointmentRequestConfirmedTemplate,
   appointmentRequestRejectedTemplate,
+  ownerNewAppointmentRequestTemplate,
 } from "../utils/emailTemplates";
 import { sendEmail } from "../utils/mailer";
 import { normalizePlate } from "../utils/normalizePlate";
@@ -32,6 +33,7 @@ type VehicleDataPayload = {
 type CreateAppointmentRequestBody = {
   ownerData?: Partial<OwnerDataPayload>;
   ownerChanged?: boolean;
+  updateExistingPending?: boolean;
   clientName?: string;
   phone?: string;
   email?: string;
@@ -39,6 +41,12 @@ type CreateAppointmentRequestBody = {
   requestType: RequestType;
   description?: string;
   suggestedDates: string[];
+};
+
+type CancelPublicRequestBody = {
+  plate?: string;
+  phone?: string;
+  reason?: string;
 };
 
 type ConfirmBody = {
@@ -52,6 +60,9 @@ type RejectBody = {
 
 const REQUEST_TYPES: RequestType[] = ["diagnosis", "repair"];
 const REQUEST_STATUSES = ["PENDING", "CONFIRMED", "REJECTED"] as const;
+const APPOINTMENT_REQUESTS_DEFAULT_PAGE_SIZE = 12;
+const APPOINTMENT_REQUESTS_MIN_PAGE_SIZE = 10;
+const APPOINTMENT_REQUESTS_MAX_PAGE_SIZE = 50;
 const DEFAULT_CALENDAR_EVENT_DURATION_MINUTES = (() => {
   const parsed = Number(process.env.APPOINTMENT_EVENT_DURATION_MINUTES || 60);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
@@ -62,6 +73,11 @@ const trimString = (value?: string) => {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
 };
+const toQueryString = (value: unknown) => {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value) && typeof value[0] === "string") return value[0];
+  return "";
+};
 const toIdString = (value: any) => String(value?._id || value || "");
 const resolveOwnerNotificationEmail = (settings?: { emailFrom?: string | null }) =>
   process.env.OWNER_NOTIFICATION_EMAIL ||
@@ -69,15 +85,17 @@ const resolveOwnerNotificationEmail = (settings?: { emailFrom?: string | null })
   process.env.EMAIL_FROM ||
   process.env.SMTP_USER;
 
+const WORKSHOP_UTC_OFFSET = process.env.WORKSHOP_UTC_OFFSET || "-03:00";
+
 const parseSuggestedDate = (rawDate: string) => {
   if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
-    return new Date(`${rawDate}T12:00:00`);
+    return new Date(`${rawDate}T12:00:00${WORKSHOP_UTC_OFFSET}`);
   }
   return new Date(rawDate);
 };
 
 const parseDateAndTime = (finalDate: string, entryTime: string) =>
-  new Date(`${finalDate}T${entryTime}:00`);
+  new Date(`${finalDate}T${entryTime}:00${WORKSHOP_UTC_OFFSET}`);
 
 const mapRequestTypeToServiceType = (requestType: RequestType) =>
   requestType === "repair" ? "REPARACION" : "PRESUPUESTO";
@@ -472,6 +490,110 @@ export const getPublicVehicleByPlate = async (req: Request, res: Response) => {
   });
 };
 
+// @desc    Get pending public appointment request by plate and phone
+// @route   GET /api/appointment-requests/public/pending?plate=...&phone=...
+// @access  Public
+export const getPublicPendingAppointmentRequest = async (
+  req: Request,
+  res: Response,
+) => {
+  const rawPlate = toQueryString(req.query.plate);
+  const rawPhone = toQueryString(req.query.phone);
+
+  const plateNormalized = normalizePlate(rawPlate);
+  const phoneNormalized = normalizePhone(rawPhone);
+
+  if (!plateNormalized || !phoneNormalized) {
+    res.status(400);
+    throw new Error("Patente y teléfono son obligatorios");
+  }
+
+  const pendingRequest = await AppointmentRequest.findOne({
+    status: "PENDING",
+    "vehicleData.plateNormalized": plateNormalized,
+    phone: phoneNormalized,
+  }).sort({ createdAt: -1 });
+
+  if (!pendingRequest) {
+    res.status(404);
+    throw new Error("No se encontró una solicitud pendiente con esos datos");
+  }
+
+  const vehicleData = pendingRequest.vehicleData || {};
+  const vehicleLabel = formatVehicleLabel(vehicleData);
+
+  res.json({
+    request: {
+      id: pendingRequest._id,
+      clientName: pendingRequest.clientName,
+      phone: pendingRequest.phone,
+      email: pendingRequest.email,
+      status: pendingRequest.status,
+      requestType: pendingRequest.requestType,
+      requestTypeLabel: mapRequestTypeToLabel(pendingRequest.requestType as RequestType),
+      description: pendingRequest.description || "",
+      suggestedDates: pendingRequest.suggestedDates || [],
+      createdAt: pendingRequest.createdAt,
+      vehicle: {
+        plateRaw: vehicleData.plateRaw,
+        plateNormalized: vehicleData.plateNormalized,
+        make: vehicleData.make,
+        model: vehicleData.model,
+        year: vehicleData.year,
+        km: vehicleData.km,
+        color: vehicleData.color,
+        label: vehicleLabel,
+      },
+    },
+  });
+};
+
+// @desc    Cancel pending public appointment request by plate and phone
+// @route   POST /api/appointment-requests/public/cancel
+// @access  Public
+export const cancelPublicPendingAppointmentRequest = async (
+  req: Request,
+  res: Response,
+) => {
+  const body = req.body as CancelPublicRequestBody;
+  const plateRaw = String(body.plate || "");
+  const phoneRaw = String(body.phone || "");
+  const plateNormalized = normalizePlate(plateRaw);
+  const phoneNormalized = normalizePhone(phoneRaw);
+
+  if (!plateNormalized || !phoneNormalized) {
+    res.status(400);
+    throw new Error("Patente y teléfono son obligatorios");
+  }
+
+  const pendingRequest = await AppointmentRequest.findOne({
+    status: "PENDING",
+    "vehicleData.plateNormalized": plateNormalized,
+    phone: phoneNormalized,
+  }).sort({ createdAt: -1 });
+
+  if (!pendingRequest) {
+    res.status(404);
+    throw new Error("No se encontró una solicitud pendiente para cancelar");
+  }
+
+  pendingRequest.status = "REJECTED";
+  pendingRequest.rejectionReason =
+    trimString(body.reason) || "Cancelada por el cliente desde la landing";
+  pendingRequest.rejectedAt = new Date();
+  await pendingRequest.save();
+
+  res.json({
+    success: true,
+    canceledRequest: {
+      id: pendingRequest._id,
+      status: pendingRequest.status,
+      rejectionReason: pendingRequest.rejectionReason,
+      rejectedAt: pendingRequest.rejectedAt,
+    },
+  });
+};
+
 // @desc    Create appointment request (public)
 // @route   POST /api/appointment-requests/public
 // @access  Public
@@ -600,7 +722,7 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
 
   const snapshotClientName =
     `${ownerPayload.firstName} ${ownerPayload.lastName}`.trim();
-  const newRequest = await AppointmentRequest.create({
+  const requestPayload = {
     clientName: snapshotClientName,
     phone: ownerPayload.phone,
     email: ownerPayload.email,
@@ -619,77 +741,170 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
     description: description?.trim() || "",
     suggestedDates: parsedSuggestedDates,
     status: "PENDING",
-  });
+  } as const;
+
+  const existingPendingRequest = await AppointmentRequest.findOne({
+    status: "PENDING",
+    $or: [
+      { vehicleId: vehicle._id, clientId: client._id },
+      {
+        "vehicleData.plateNormalized": normalizedPlate,
+        phone: ownerPayload.phone,
+      },
+    ],
+  }).sort({ createdAt: -1 });
+
+  let requestDoc: any;
+  let wasUpdatedExisting = false;
+
+  if (existingPendingRequest) {
+    if (!body.updateExistingPending) {
+      const pendingDateLabel = new Date(
+        existingPendingRequest.createdAt || new Date(),
+      ).toLocaleDateString("es-AR");
+
+      res.status(409).json({
+        code: "PENDING_REQUEST_EXISTS",
+        message: `Ya tenés una solicitud pendiente del ${pendingDateLabel}. ¿Querés actualizar fechas?`,
+        existingRequest: {
+          id: existingPendingRequest._id,
+          createdAt: existingPendingRequest.createdAt,
+          suggestedDates: (existingPendingRequest.suggestedDates || []).map(
+            (date: Date) => new Date(date).toISOString(),
+          ),
+        },
+      });
+      return;
+    }
+
+    existingPendingRequest.clientName = requestPayload.clientName;
+    existingPendingRequest.phone = requestPayload.phone;
+    existingPendingRequest.email = requestPayload.email;
+    existingPendingRequest.clientId = requestPayload.clientId;
+    existingPendingRequest.vehicleId = requestPayload.vehicleId;
+    existingPendingRequest.vehicleData = requestPayload.vehicleData;
+    existingPendingRequest.requestType = requestPayload.requestType;
+    existingPendingRequest.description = requestPayload.description;
+    existingPendingRequest.suggestedDates = requestPayload.suggestedDates;
+    requestDoc = await existingPendingRequest.save();
+    wasUpdatedExisting = true;
+  } else {
+    requestDoc = await AppointmentRequest.create(requestPayload);
+  }
 
   try {
     const settings = await Settings.findOne();
     const ownerEmail = resolveOwnerNotificationEmail(settings || undefined);
 
     if (ownerEmail) {
-      const shopName = settings?.shopName || "Taller";
-      const suggestedDateLabels = parsedSuggestedDates
-        .slice(0, 5)
-        .map((date) => new Date(date).toLocaleDateString("es-AR"))
-        .join(", ");
       const ownerVehicleLabel = formatVehicleLabel({
         make: vehicle.make || resolvedMake,
         model: vehicle.model || resolvedModel,
         plateNormalized: vehicle.plateNormalized || normalizedPlate,
       });
+      const frontendBaseUrl = (
+        process.env.FRONTEND_URL ||
+        process.env.APP_BASE_URL ||
+        ""
+      )
+        .trim()
+        .replace(/\/+$/, "");
+      const manageRequestsUrl = frontendBaseUrl
+        ? `${frontendBaseUrl}/app/appointment-requests`
+        : undefined;
+
+      const ownerTemplate = ownerNewAppointmentRequestTemplate({
+        clientName: snapshotClientName,
+        phone: ownerPayload.phone,
+        email: ownerPayload.email,
+        vehicleLabel: ownerVehicleLabel,
+        requestTypeLabel: mapRequestTypeToLabel(requestType),
+        description: description?.trim() || undefined,
+        suggestedDates: parsedSuggestedDates,
+        manageRequestsUrl,
+        notificationType: wasUpdatedExisting ? "UPDATED" : "NEW",
+        settings: {
+          shopName: settings?.shopName,
+          address: settings?.address ?? undefined,
+          phone: settings?.phone ?? undefined,
+          emailFrom: settings?.emailFrom ?? undefined,
+          logoUrl: settings?.logoUrl ?? undefined,
+        },
+      });
 
       await sendEmail({
         to: ownerEmail,
-        subject: `Nueva solicitud de turno - ${ownerVehicleLabel}`,
-        html: `
-          <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.5;">
-            <h2 style="margin: 0 0 12px;">Nueva solicitud de turno</h2>
-            <p style="margin: 0 0 12px;">${shopName} recibio una nueva solicitud desde la landing.</p>
-            <p style="margin: 0;"><strong>Cliente:</strong> ${snapshotClientName}</p>
-            <p style="margin: 0;"><strong>Telefono:</strong> ${ownerPayload.phone}</p>
-            ${ownerPayload.email ? `<p style="margin: 0;"><strong>Email:</strong> ${ownerPayload.email}</p>` : ""}
-            <p style="margin: 0;"><strong>Vehiculo:</strong> ${ownerVehicleLabel}</p>
-            <p style="margin: 0;"><strong>Tipo:</strong> ${mapRequestTypeToLabel(requestType)}</p>
-            ${description?.trim() ? `<p style="margin: 0;"><strong>Detalle:</strong> ${description.trim()}</p>` : ""}
-            <p style="margin: 12px 0 0;"><strong>Fechas sugeridas:</strong> ${suggestedDateLabels || "-"}</p>
-          </div>
-        `,
-        text: [
-          `${shopName} recibio una nueva solicitud de turno.`,
-          `Cliente: ${snapshotClientName}`,
-          `Telefono: ${ownerPayload.phone}`,
-          ownerPayload.email ? `Email: ${ownerPayload.email}` : "",
-          `Vehiculo: ${ownerVehicleLabel}`,
-          `Tipo: ${mapRequestTypeToLabel(requestType)}`,
-          description?.trim() ? `Detalle: ${description.trim()}` : "",
-          `Fechas sugeridas: ${suggestedDateLabels || "-"}`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
+        subject: ownerTemplate.subject,
+        html: ownerTemplate.html,
+        text: ownerTemplate.text,
       });
     }
   } catch (error) {
     console.error("Error enviando email de nueva solicitud al taller:", error);
   }
 
-  res.status(201).json(newRequest);
+  res.status(wasUpdatedExisting ? 200 : 201).json({
+    ...(requestDoc?.toObject ? requestDoc.toObject() : requestDoc),
+    wasUpdatedExisting,
+  });
 };
 
 // @desc    List appointment requests
 // @route   GET /api/appointment-requests
 // @access  Private
 export const getAppointmentRequests = async (req: Request, res: Response) => {
+  const requestedPageSize = Number(req.query.pageSize);
+  const requestedPage = Number(req.query.pageNumber);
+
+  const pageSize = Number.isFinite(requestedPageSize)
+    ? Math.min(
+        APPOINTMENT_REQUESTS_MAX_PAGE_SIZE,
+        Math.max(APPOINTMENT_REQUESTS_MIN_PAGE_SIZE, Math.floor(requestedPageSize)),
+      )
+    : APPOINTMENT_REQUESTS_DEFAULT_PAGE_SIZE;
+  const page = Number.isFinite(requestedPage)
+    ? Math.max(1, Math.floor(requestedPage))
+    : 1;
+
   const status = req.query.status as string | undefined;
-  const query: Record<string, unknown> = {};
+  const suggestedFromRaw = toQueryString(req.query.suggestedFrom);
+  const suggestedToRaw = toQueryString(req.query.suggestedTo);
+  const query: Record<string, any> = {};
 
   if (status && (REQUEST_STATUSES as readonly string[]).includes(status)) {
     query.status = status;
   }
 
+  const suggestedRange: Record<string, Date> = {};
+  if (suggestedFromRaw) {
+    const fromDate = new Date(suggestedFromRaw);
+    if (!Number.isNaN(fromDate.getTime())) {
+      suggestedRange.$gte = fromDate;
+    }
+  }
+  if (suggestedToRaw) {
+    const toDate = new Date(suggestedToRaw);
+    if (!Number.isNaN(toDate.getTime())) {
+      suggestedRange.$lte = toDate;
+    }
+  }
+  if (Object.keys(suggestedRange).length > 0) {
+    query.suggestedDates = { $elemMatch: suggestedRange };
+  }
+
+  const count = await AppointmentRequest.countDocuments(query);
   const requests = await AppointmentRequest.find(query)
     .populate("confirmedAppointmentId")
-    .sort({ createdAt: -1 });
+    .sort({ createdAt: -1 })
+    .limit(pageSize)
+    .skip(pageSize * (page - 1));
 
-  res.json(requests);
+  res.json({
+    requests,
+    page,
+    pages: Math.ceil(count / pageSize),
+    totalCount: count,
+  });
 };
 
 // @desc    Confirm appointment request

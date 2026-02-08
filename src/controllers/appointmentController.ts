@@ -8,6 +8,9 @@ import { appointmentCreatedTemplate } from '../utils/emailTemplates';
 import WorkOrder from '../models/WorkOrder';
 import { Estimate } from '../models/Finance';
 
+const isCompletedAppointment = (status?: string) =>
+  status === 'COMPLETED' || status === 'CLOSED';
+
 // @desc    Get appointments (filtered by date range)
 // @route   GET /api/appointments
 // @access  Private
@@ -149,6 +152,11 @@ export const updateAppointment = async (req: Request, res: Response) => {
   const appointment = await Appointment.findById(req.params.id);
 
   if (appointment) {
+    if (isCompletedAppointment(appointment.status)) {
+      res.status(400);
+      throw new Error('El turno ya está completado y no puede editarse');
+    }
+
     if (req.body.startAt) {
       const startDate = new Date(req.body.startAt);
       const dayStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 0, 0, 0, 0);
@@ -210,6 +218,11 @@ export const cancelAppointment = async (req: Request, res: Response) => {
   const appointment = await Appointment.findById(req.params.id);
 
   if (appointment) {
+    if (isCompletedAppointment(appointment.status)) {
+      res.status(400);
+      throw new Error('No se puede cancelar un turno completado');
+    }
+
     appointment.status = 'CANCELLED';
     appointment.cancelReason = reason;
     await appointment.save();
@@ -227,6 +240,11 @@ export const deleteAppointment = async (req: Request, res: Response) => {
   const appointment = await Appointment.findById(req.params.id);
 
   if (appointment) {
+    if (isCompletedAppointment(appointment.status)) {
+      res.status(400);
+      throw new Error('No se puede eliminar un turno completado');
+    }
+
     await WorkOrder.deleteMany({ appointmentId: appointment._id });
     await appointment.deleteOne();
     res.json({ message: 'Cita eliminada' });
@@ -245,6 +263,11 @@ export const convertToWorkOrder = async (req: Request, res: Response) => {
   if (!appointment) {
     res.status(404);
     throw new Error('Cita no encontrada');
+  }
+
+  if (isCompletedAppointment(appointment.status)) {
+    res.status(400);
+    throw new Error('Un turno completado no permite crear una nueva orden de trabajo');
   }
 
   // Check if WO already exists for this appointment

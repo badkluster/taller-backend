@@ -1,4 +1,4 @@
-import { resolveLogoUrl } from './branding';
+import { resolveLogoUrl } from "./branding";
 
 type ShopSettings = {
   shopName?: string;
@@ -8,14 +8,26 @@ type ShopSettings = {
   logoUrl?: string;
 };
 
+const escapeHtml = (value?: string | null) =>
+  String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
 const formatCurrency = (value: number) =>
-  new Intl.NumberFormat('es-AR', { style: 'currency', currency: 'ARS', maximumFractionDigits: 0 }).format(value);
+  new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS",
+    maximumFractionDigits: 0,
+  }).format(value);
 
 const baseLayout = (title: string, body: string, settings: ShopSettings) => {
   const logoUrl = resolveLogoUrl(settings.logoUrl);
   const logoHtml = logoUrl
-    ? `<img src="${logoUrl}" alt="${settings.shopName || 'Taller Mecánico'}" style="height:40px; max-width:140px; object-fit:contain;" />`
-    : '';
+    ? `<img src="${logoUrl}" alt="${settings.shopName || "Taller Mecánico"}" style="height:40px; max-width:140px; object-fit:contain;" />`
+    : "";
 
   return `
   <div style="font-family: Arial, sans-serif; background:#f6f7fb; padding:24px;">
@@ -24,8 +36,8 @@ const baseLayout = (title: string, body: string, settings: ShopSettings) => {
         <div style="display:flex; align-items:center; gap:12px;">
           ${logoHtml}
           <div>
-            <div style="font-size:18px; font-weight:700;">${settings.shopName || 'Taller Mecánico'}</div>
-            <div style="font-size:12px; opacity:.8;">${settings.address || ''}</div>
+            <div style="font-size:18px; font-weight:700;">${settings.shopName || "Taller Mecánico"}</div>
+            <div style="font-size:12px; opacity:.8;">${settings.address || ""}</div>
           </div>
         </div>
       </div>
@@ -34,8 +46,8 @@ const baseLayout = (title: string, body: string, settings: ShopSettings) => {
         ${body}
       </div>
       <div style="padding:16px 24px; background:#f1f5f9; font-size:12px; color:#475569;">
-        <div>📞 ${settings.phone || 'Sin teléfono'}</div>
-        <div>✉️ ${settings.emailFrom || ''}</div>
+        <div>📞 ${settings.phone || "Sin teléfono"}</div>
+        <div>✉️ ${settings.emailFrom || ""}</div>
       </div>
     </div>
   </div>
@@ -63,16 +75,16 @@ export const appointmentCreatedTemplate = (data: {
       <tr><td style="padding:6px 0; color:#64748b;">Servicio</td><td style="padding:6px 0;">${data.serviceType}</td></tr>
       <tr><td style="padding:6px 0; color:#64748b;">Cliente</td><td style="padding:6px 0;">${data.clientName}</td></tr>
       <tr><td style="padding:6px 0; color:#64748b;">Vehículo</td><td style="padding:6px 0;">${data.vehicleLabel}</td></tr>
-      ${data.clientPhone ? `<tr><td style="padding:6px 0; color:#64748b;">Teléfono</td><td style="padding:6px 0;">${data.clientPhone}</td></tr>` : ''}
-      ${data.clientEmail ? `<tr><td style="padding:6px 0; color:#64748b;">Email</td><td style="padding:6px 0;">${data.clientEmail}</td></tr>` : ''}
+      ${data.clientPhone ? `<tr><td style="padding:6px 0; color:#64748b;">Teléfono</td><td style="padding:6px 0;">${data.clientPhone}</td></tr>` : ""}
+      ${data.clientEmail ? `<tr><td style="padding:6px 0; color:#64748b;">Email</td><td style="padding:6px 0;">${data.clientEmail}</td></tr>` : ""}
     </table>
-    ${data.notes ? `<p style="margin-top:12px;"><strong>Notas:</strong> ${data.notes}</p>` : ''}
+    ${data.notes ? `<p style="margin-top:12px;"><strong>Notas:</strong> ${data.notes}</p>` : ""}
   `;
 
   return {
     subject: `Nuevo turno creado - ${data.vehicleLabel}`,
-    html: baseLayout('Nuevo turno creado', body, data.settings),
-    text: `Nuevo turno creado\nID: ${data.appointmentId}\nFecha: ${new Date(data.startAt).toLocaleString()}\nCliente: ${data.clientName}\nVehículo: ${data.vehicleLabel}\nServicio: ${data.serviceType}\n${data.notes ? `Notas: ${data.notes}` : ''}`,
+    html: baseLayout("Nuevo turno creado", body, data.settings),
+    text: `Nuevo turno creado\nID: ${data.appointmentId}\nFecha: ${new Date(data.startAt).toLocaleString()}\nCliente: ${data.clientName}\nVehículo: ${data.vehicleLabel}\nServicio: ${data.serviceType}\n${data.notes ? `Notas: ${data.notes}` : ""}`,
   };
 };
 
@@ -88,14 +100,14 @@ export const estimateEmailTemplate = (data: {
     <p>Hola ${data.clientName},</p>
     <p>Te enviamos el presupuesto para tu vehículo <strong>${data.vehicleLabel}</strong>.</p>
     <p style="font-size:18px; font-weight:700; color:#0f172a;">Total estimado: ${formatCurrency(data.total)}</p>
-    ${data.pdfUrl ? `<p><a href="${data.pdfUrl}" style="color:#2563eb; font-weight:700;">Descargar PDF</a></p>` : ''}
+    ${data.pdfUrl ? `<p><a href="${data.pdfUrl}" style="color:#2563eb; font-weight:700;">Descargar PDF</a></p>` : ""}
     <p>Quedamos atentos a tu confirmación.</p>
   `;
 
   return {
     subject: `Presupuesto ${data.estimateNumber} - ${data.vehicleLabel}`,
-    html: baseLayout('Presupuesto', body, data.settings),
-    text: `Hola ${data.clientName}\nPresupuesto ${data.estimateNumber}\nVehículo: ${data.vehicleLabel}\nTotal estimado: ${formatCurrency(data.total)}\n${data.pdfUrl ? `PDF: ${data.pdfUrl}` : ''}`,
+    html: baseLayout("Presupuesto", body, data.settings),
+    text: `Hola ${data.clientName}\nPresupuesto ${data.estimateNumber}\nVehículo: ${data.vehicleLabel}\nTotal estimado: ${formatCurrency(data.total)}\n${data.pdfUrl ? `PDF: ${data.pdfUrl}` : ""}`,
   };
 };
 
@@ -111,14 +123,14 @@ export const invoiceEmailTemplate = (data: {
     <p>Hola ${data.clientName},</p>
     <p>Adjuntamos la factura correspondiente al trabajo realizado en tu vehículo <strong>${data.vehicleLabel}</strong>.</p>
     <p style="font-size:18px; font-weight:700; color:#0f172a;">Total: ${formatCurrency(data.total)}</p>
-    ${data.pdfUrl ? `<p><a href="${data.pdfUrl}" style="color:#2563eb; font-weight:700;">Descargar PDF</a></p>` : ''}
+    ${data.pdfUrl ? `<p><a href="${data.pdfUrl}" style="color:#2563eb; font-weight:700;">Descargar PDF</a></p>` : ""}
     <p>Gracias por confiar en nosotros.</p>
   `;
 
   return {
     subject: `Factura ${data.invoiceNumber} - ${data.vehicleLabel}`,
-    html: baseLayout('Factura', body, data.settings),
-    text: `Hola ${data.clientName}\nFactura ${data.invoiceNumber}\nVehículo: ${data.vehicleLabel}\nTotal: ${formatCurrency(data.total)}\n${data.pdfUrl ? `PDF: ${data.pdfUrl}` : ''}`,
+    html: baseLayout("Factura", body, data.settings),
+    text: `Hola ${data.clientName}\nFactura ${data.invoiceNumber}\nVehículo: ${data.vehicleLabel}\nTotal: ${formatCurrency(data.total)}\n${data.pdfUrl ? `PDF: ${data.pdfUrl}` : ""}`,
   };
 };
 
@@ -136,10 +148,12 @@ export const appointmentRequestConfirmedTemplate = (data: {
     <table style="width:100%; border-collapse:collapse; font-size:14px;">
       <tr><td style="padding:6px 0; color:#64748b;">Fecha y hora</td><td style="padding:6px 0; font-weight:700;">${new Date(data.confirmedAt).toLocaleString()}</td></tr>
       <tr><td style="padding:6px 0; color:#64748b;">Vehículo</td><td style="padding:6px 0;">${data.vehicleLabel}</td></tr>
-      ${data.settings.address ? `<tr><td style="padding:6px 0; color:#64748b;">Dirección</td><td style="padding:6px 0;">${data.settings.address}</td></tr>` : ''}
+      ${data.settings.address ? `<tr><td style="padding:6px 0; color:#64748b;">Dirección</td><td style="padding:6px 0;">${data.settings.address}</td></tr>` : ""}
     </table>
-    ${data.description ? `<p style="margin-top:12px;"><strong>Detalle:</strong> ${data.description}</p>` : ''}
-    ${data.googleCalendarUrl ? `
+    ${data.description ? `<p style="margin-top:12px;"><strong>Detalle:</strong> ${data.description}</p>` : ""}
+    ${
+      data.googleCalendarUrl
+        ? `
       <div style="margin-top:20px;">
         <a href="${data.googleCalendarUrl}" style="display:inline-block; background:#2563eb; color:#fff; padding:10px 16px; border-radius:8px; font-weight:700; text-decoration:none;">
           Agregar a Google Calendar
@@ -149,13 +163,15 @@ export const appointmentRequestConfirmedTemplate = (data: {
         Si el botón no funciona, copiá este enlace:
         <a href="${data.googleCalendarUrl}" style="color:#2563eb;">Abrir Google Calendar</a>
       </p>
-    ` : ''}
+    `
+        : ""
+    }
   `;
 
   return {
     subject: `Solicitud confirmada - ${data.vehicleLabel}`,
-    html: baseLayout('Solicitud confirmada', body, data.settings),
-    text: `Hola ${data.clientName}\nTu solicitud fue confirmada.\nFecha y hora: ${new Date(data.confirmedAt).toLocaleString()}\nVehículo: ${data.vehicleLabel}\n${data.settings.address ? `Dirección: ${data.settings.address}\n` : ''}${data.googleCalendarUrl ? `Agregar a Google Calendar: ${data.googleCalendarUrl}` : ''}`,
+    html: baseLayout("Solicitud confirmada", body, data.settings),
+    text: `Hola ${data.clientName}\nTu solicitud fue confirmada.\nFecha y hora: ${new Date(data.confirmedAt).toLocaleString()}\nVehículo: ${data.vehicleLabel}\n${data.settings.address ? `Dirección: ${data.settings.address}\n` : ""}${data.googleCalendarUrl ? `Agregar a Google Calendar: ${data.googleCalendarUrl}` : ""}`,
   };
 };
 
@@ -169,13 +185,159 @@ export const appointmentRequestRejectedTemplate = (data: {
     <p>Hola ${data.clientName},</p>
     <p>Tu solicitud fue <strong>rechazada</strong>.</p>
     <p style="margin-top:12px;"><strong>Motivo:</strong> ${data.rejectionReason}</p>
-    <p style="margin-top:12px;">Si querés, podés responder este mensaje para coordinarmos una alternativa.</p>
+    <p style="margin-top:12px;">Si querés, podés responder este mensaje para coordinar una alternativa.</p>
     <p><strong>Vehículo:</strong> ${data.vehicleLabel}</p>
   `;
 
   return {
     subject: `Solicitud rechazada - ${data.vehicleLabel}`,
-    html: baseLayout('Solicitud rechazada', body, data.settings),
+    html: baseLayout("Solicitud rechazada", body, data.settings),
     text: `Hola ${data.clientName}\nTu solicitud fue rechazada.\nMotivo: ${data.rejectionReason}\nVehículo: ${data.vehicleLabel}`,
+  };
+};
+
+export const ownerNewAppointmentRequestTemplate = (data: {
+  clientName: string;
+  phone: string;
+  email?: string;
+  vehicleLabel: string;
+  requestTypeLabel: string;
+  description?: string;
+  suggestedDates: Date[];
+  manageRequestsUrl?: string;
+  notificationType?: "NEW" | "UPDATED";
+  settings: ShopSettings;
+}) => {
+  const notificationType =
+    data.notificationType === "UPDATED" ? "UPDATED" : "NEW";
+  const isUpdated = notificationType === "UPDATED";
+  const safeClientName = escapeHtml(data.clientName);
+  const safePhone = escapeHtml(data.phone);
+  const safeEmail = escapeHtml(data.email);
+  const safeVehicleLabel = escapeHtml(data.vehicleLabel);
+  const safeRequestTypeLabel = escapeHtml(data.requestTypeLabel);
+  const safeDescription = escapeHtml(data.description);
+  const safeManageRequestsUrl = escapeHtml(data.manageRequestsUrl);
+
+  const dateLabels = data.suggestedDates
+    .map((date) =>
+      new Date(date).toLocaleDateString("es-AR", {
+        weekday: "short",
+        day: "2-digit",
+        month: "2-digit",
+      }),
+    )
+    .filter(Boolean);
+
+  const datePillsHtml = dateLabels.length
+    ? dateLabels
+        .map(
+          (label) =>
+            `<span style="display:inline-block; margin:4px 6px 0 0; padding:6px 10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:999px; color:#1d4ed8; font-size:12px; font-weight:700;">${escapeHtml(label)}</span>`,
+        )
+        .join("")
+    : '<span style="color:#64748b;">Sin fechas sugeridas</span>';
+
+  const body = `
+    <div style="margin-bottom:14px;">
+      <span style="display:inline-block; padding:6px 10px; background:#ecfeff; border:1px solid #a5f3fc; border-radius:999px; color:#155e75; font-size:12px; font-weight:700;">
+        ${isUpdated ? "Solicitud actualizada" : "Nueva solicitud recibida"}
+      </span>
+    </div>
+
+    <p style="margin:0 0 14px; color:#334155;">
+      ${
+        isUpdated
+          ? "El cliente actualizó una solicitud pendiente desde la landing."
+          : "Ingresó una nueva solicitud de turno desde la landing."
+      }
+      Revisala para confirmar fecha y hora con el cliente.
+    </p>
+
+    <div style="border:1px solid #e2e8f0; border-radius:12px; padding:14px; background:#f8fafc; margin:0 0 14px;">
+      <div style="font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; margin-bottom:4px;">Vehículo</div>
+      <div style="font-size:18px; font-weight:800; color:#0f172a; margin-bottom:6px;">${safeVehicleLabel}</div>
+      <div style="font-size:14px; color:#334155;">Tipo solicitado: <strong>${safeRequestTypeLabel}</strong></div>
+    </div>
+
+    <table style="width:100%; border-collapse:collapse; margin:0 0 14px; font-size:14px;">
+      <tr>
+        <td style="padding:8px 0; color:#64748b; width:120px;">Cliente</td>
+        <td style="padding:8px 0; color:#0f172a; font-weight:700;">${safeClientName}</td>
+      </tr>
+      <tr>
+        <td style="padding:8px 0; color:#64748b;">Teléfono</td>
+        <td style="padding:8px 0;">
+          <a href="tel:${safePhone}" style="color:#0f172a; font-weight:700; text-decoration:none;">${safePhone}</a>
+        </td>
+      </tr>
+      ${
+        data.email
+          ? `
+      <tr>
+        <td style="padding:8px 0; color:#64748b;">Email</td>
+        <td style="padding:8px 0;">
+          <a href="mailto:${safeEmail}" style="color:#2563eb; font-weight:700; text-decoration:none;">${safeEmail}</a>
+        </td>
+      </tr>
+      `
+          : ""
+      }
+    </table>
+
+    ${
+      data.description
+        ? `
+      <div style="border-left:4px solid #2563eb; background:#f8fafc; padding:10px 12px; margin:0 0 14px;">
+        <div style="font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; margin-bottom:4px;">Detalle informado</div>
+        <div style="font-size:14px; color:#1e293b;">${safeDescription}</div>
+      </div>
+    `
+        : ""
+    }
+
+    <div style="margin:0 0 16px;">
+      <div style="font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; margin-bottom:6px;">Fechas sugeridas</div>
+      ${datePillsHtml}
+    </div>
+
+    ${
+      data.manageRequestsUrl
+        ? `
+      <div style="margin-top:18px;">
+        <a href="${safeManageRequestsUrl}" style="display:inline-block; background:#2563eb; color:#ffffff; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:700;">
+          Ver solicitudes pendientes
+        </a>
+      </div>
+    `
+        : ""
+    }
+  `;
+
+  const suggestedDateLabels = dateLabels.join(", ") || "-";
+  const text = [
+    "Nueva solicitud de turno",
+    `Cliente: ${data.clientName}`,
+    `Telefono: ${data.phone}`,
+    data.email ? `Email: ${data.email}` : "",
+    `Vehiculo: ${data.vehicleLabel}`,
+    `Tipo: ${data.requestTypeLabel}`,
+    data.description ? `Detalle: ${data.description}` : "",
+    `Fechas sugeridas: ${suggestedDateLabels}`,
+    data.manageRequestsUrl
+      ? `Gestionar solicitudes: ${data.manageRequestsUrl}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    subject: `${isUpdated ? "Solicitud actualizada" : "Nueva solicitud de turno"} - ${data.vehicleLabel}`,
+    html: baseLayout(
+      isUpdated ? "Solicitud actualizada" : "Nueva solicitud de turno",
+      body,
+      data.settings,
+    ),
+    text,
   };
 };

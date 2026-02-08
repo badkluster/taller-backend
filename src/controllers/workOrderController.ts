@@ -54,6 +54,42 @@ const parseDateBoundary = (
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
+const WORK_ORDER_STATUS_FILTERS: Record<string, string[]> = {
+  PRESUPUESTO: ['PRESUPUESTO', 'OPEN'],
+  OPEN: ['PRESUPUESTO', 'OPEN'],
+  EN_PROCESO: ['EN_PROCESO', 'IN_PROGRESS'],
+  IN_PROGRESS: ['EN_PROCESO', 'IN_PROGRESS'],
+  COMPLETADA: ['COMPLETADA', 'CLOSED'],
+  CLOSED: ['COMPLETADA', 'CLOSED'],
+  CANCELADA: ['CANCELADA', 'CANCELLED'],
+  CANCELLED: ['CANCELADA', 'CANCELLED'],
+};
+
+const buildWorkOrderStatusQuery = (rawStatus: unknown) => {
+  if (!rawStatus) return null;
+
+  const raw = Array.isArray(rawStatus)
+    ? rawStatus.map((item) => String(item)).join(',')
+    : String(rawStatus);
+
+  const requested = raw
+    .split(',')
+    .map((status) => status.trim().toUpperCase())
+    .filter(Boolean);
+
+  if (!requested.length || requested.includes('ALL')) return null;
+
+  const expanded = new Set<string>();
+  requested.forEach((status) => {
+    const mappedStatuses = WORK_ORDER_STATUS_FILTERS[status] || [status];
+    mappedStatuses.forEach((mappedStatus) => expanded.add(mappedStatus));
+  });
+
+  const statuses = Array.from(expanded);
+  if (!statuses.length) return null;
+  return statuses.length === 1 ? statuses[0] : { $in: statuses };
+};
+
 const extractCloudinaryPublicId = (url?: string) => {
   if (!url) return null;
   const match = url.match(/\/upload\/(?:v\d+\/)?(.+?)(?:\.\w+)?$/);
@@ -82,13 +118,25 @@ const deleteCloudinaryAsset = async (url?: string) => {
 // @route   GET /api/workorders
 // @access  Private
 export const getWorkOrders = async (req: Request, res: Response) => {
-  const pageSize = Number(req.query.pageSize) || 10;
-  const page = Number(req.query.pageNumber) || 1;
+  const DEFAULT_PAGE_SIZE = 10;
+  const MIN_PAGE_SIZE = 10;
+  const MAX_PAGE_SIZE = 50;
+
+  const requestedPageSize = Number(req.query.pageSize);
+  const requestedPage = Number(req.query.pageNumber);
+
+  const pageSize = Number.isFinite(requestedPageSize)
+    ? Math.min(MAX_PAGE_SIZE, Math.max(MIN_PAGE_SIZE, Math.floor(requestedPageSize)))
+    : DEFAULT_PAGE_SIZE;
+  const page = Number.isFinite(requestedPage)
+    ? Math.max(1, Math.floor(requestedPage))
+    : 1;
   const { vehicleId, status, appointmentId, keyword, startDate, endDate } = req.query;
 
   const query: any = {};
   if (vehicleId) query.vehicleId = vehicleId;
-  if (status) query.status = status;
+  const statusQuery = buildWorkOrderStatusQuery(status);
+  if (statusQuery) query.status = statusQuery;
   if (appointmentId) query.appointmentId = appointmentId;
   if (startDate || endDate) {
     const start = parseDateBoundary(startDate, 'start');

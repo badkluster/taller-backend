@@ -98,19 +98,20 @@ const getNextDocumentNumber = async (
 ) => {
   const maxUsedValue = await getMaxUsedSequence(model, prefix);
 
-  await Sequence.findOneAndUpdate(
+  // Keep the sequence at least at the max value already used in persisted docs.
+  // Avoid updating the same field ("value") via multiple operators in one command.
+  await Sequence.updateOne(
     { key: sequenceKey },
     {
-      $setOnInsert: { key: sequenceKey, value: 0 },
       $max: { value: maxUsedValue },
     },
-    { upsert: true, setDefaultsOnInsert: true },
+    { upsert: true },
   );
 
   const sequence = await Sequence.findOneAndUpdate(
     { key: sequenceKey },
     { $inc: { value: 1 } },
-    { new: true },
+    { new: true, upsert: true },
   );
 
   if (!sequence) {
@@ -243,8 +244,19 @@ export const createEstimate = async (req: Request, res: Response) => {
 // @route   GET /api/estimates
 // @access  Private
 export const getEstimates = async (req: Request, res: Response) => {
-  const pageSize = Number(req.query.pageSize) || 10;
-  const page = Number(req.query.pageNumber) || 1;
+  const DEFAULT_PAGE_SIZE = 10;
+  const MIN_PAGE_SIZE = 10;
+  const MAX_PAGE_SIZE = 50;
+
+  const requestedPageSize = Number(req.query.pageSize);
+  const requestedPage = Number(req.query.pageNumber);
+
+  const pageSize = Number.isFinite(requestedPageSize)
+    ? Math.min(MAX_PAGE_SIZE, Math.max(MIN_PAGE_SIZE, Math.floor(requestedPageSize)))
+    : DEFAULT_PAGE_SIZE;
+  const page = Number.isFinite(requestedPage)
+    ? Math.max(1, Math.floor(requestedPage))
+    : 1;
   const keyword = req.query.keyword ? String(req.query.keyword) : '';
   const { workOrderId, vehicleId, clientId } = req.query;
 
@@ -370,8 +382,19 @@ export const createInvoice = async (req: Request, res: Response) => {
 // @route   GET /api/invoices
 // @access  Private
 export const getInvoices = async (req: Request, res: Response) => {
-  const pageSize = Number(req.query.pageSize) || 10;
-  const page = Number(req.query.pageNumber) || 1;
+  const DEFAULT_PAGE_SIZE = 10;
+  const MIN_PAGE_SIZE = 10;
+  const MAX_PAGE_SIZE = 50;
+
+  const requestedPageSize = Number(req.query.pageSize);
+  const requestedPage = Number(req.query.pageNumber);
+
+  const pageSize = Number.isFinite(requestedPageSize)
+    ? Math.min(MAX_PAGE_SIZE, Math.max(MIN_PAGE_SIZE, Math.floor(requestedPageSize)))
+    : DEFAULT_PAGE_SIZE;
+  const page = Number.isFinite(requestedPage)
+    ? Math.max(1, Math.floor(requestedPage))
+    : 1;
   const keyword = req.query.keyword ? String(req.query.keyword) : '';
 
   const query: any = {};

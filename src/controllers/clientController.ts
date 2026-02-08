@@ -8,8 +8,18 @@ import WorkOrder from '../models/WorkOrder';
 // @route   GET /api/clients
 // @access  Private
 export const getClients = async (req: Request, res: Response) => {
-  const pageSize = Number(req.query.pageSize) || 20;
-  const page = Number(req.query.pageNumber) || 1;
+  const DEFAULT_PAGE_SIZE = 20;
+  const MIN_PAGE_SIZE = 10;
+
+  const requestedPageSize = Number(req.query.pageSize);
+  const requestedPage = Number(req.query.pageNumber);
+
+  const pageSize = Number.isFinite(requestedPageSize)
+    ? Math.max(MIN_PAGE_SIZE, Math.floor(requestedPageSize))
+    : DEFAULT_PAGE_SIZE;
+  const page = Number.isFinite(requestedPage)
+    ? Math.max(1, Math.floor(requestedPage))
+    : 1;
   const keyword = req.query.keyword
     ? {
         $or: [
