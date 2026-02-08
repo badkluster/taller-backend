@@ -14,18 +14,24 @@ dotenv.config();
 const importData = async () => {
   try {
     await mongoose.connect(process.env.MONGODB_URI as string);
+    const db = mongoose.connection.db;
+    if (!db) {
+      throw new Error('Database connection is not available');
+    }
 
     // Drop collections to clear old indexes
-    const collections = await mongoose.connection.db.listCollections().toArray();
+    const collections = await db.listCollections().toArray();
     const collectionNames = collections.map(c => c.name);
     
-    if (collectionNames.includes('users')) await mongoose.connection.db.dropCollection('users');
-    if (collectionNames.includes('vehicles')) await mongoose.connection.db.dropCollection('vehicles');
-    if (collectionNames.includes('clients')) await mongoose.connection.db.dropCollection('clients');
-    if (collectionNames.includes('workorders')) await mongoose.connection.db.dropCollection('workorders');
-    if (collectionNames.includes('invoices')) await mongoose.connection.db.dropCollection('invoices');
-    if (collectionNames.includes('settings')) await mongoose.connection.db.dropCollection('settings');
-    if (collectionNames.includes('appointments')) await mongoose.connection.db.dropCollection('appointments');
+    if (collectionNames.includes('users')) await db.dropCollection('users');
+    if (collectionNames.includes('vehicles')) await db.dropCollection('vehicles');
+    if (collectionNames.includes('clients')) await db.dropCollection('clients');
+    if (collectionNames.includes('workorders')) await db.dropCollection('workorders');
+    if (collectionNames.includes('invoices')) await db.dropCollection('invoices');
+    if (collectionNames.includes('settings')) await db.dropCollection('settings');
+    if (collectionNames.includes('appointments')) await db.dropCollection('appointments');
+    if (collectionNames.includes('appointmentrequests')) await db.dropCollection('appointmentrequests');
+    if (collectionNames.includes('sequences')) await db.dropCollection('sequences');
 
     console.log('Collections dropped (including indexes)');
 

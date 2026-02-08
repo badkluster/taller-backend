@@ -121,3 +121,61 @@ export const invoiceEmailTemplate = (data: {
     text: `Hola ${data.clientName}\nFactura ${data.invoiceNumber}\nVehículo: ${data.vehicleLabel}\nTotal: ${formatCurrency(data.total)}\n${data.pdfUrl ? `PDF: ${data.pdfUrl}` : ''}`,
   };
 };
+
+export const appointmentRequestConfirmedTemplate = (data: {
+  clientName: string;
+  confirmedAt: Date;
+  vehicleLabel: string;
+  description?: string;
+  googleCalendarUrl?: string;
+  settings: ShopSettings;
+}) => {
+  const body = `
+    <p>Hola ${data.clientName},</p>
+    <p>Tu solicitud fue <strong>confirmada</strong>.</p>
+    <table style="width:100%; border-collapse:collapse; font-size:14px;">
+      <tr><td style="padding:6px 0; color:#64748b;">Fecha y hora</td><td style="padding:6px 0; font-weight:700;">${new Date(data.confirmedAt).toLocaleString()}</td></tr>
+      <tr><td style="padding:6px 0; color:#64748b;">Vehículo</td><td style="padding:6px 0;">${data.vehicleLabel}</td></tr>
+      ${data.settings.address ? `<tr><td style="padding:6px 0; color:#64748b;">Dirección</td><td style="padding:6px 0;">${data.settings.address}</td></tr>` : ''}
+    </table>
+    ${data.description ? `<p style="margin-top:12px;"><strong>Detalle:</strong> ${data.description}</p>` : ''}
+    ${data.googleCalendarUrl ? `
+      <div style="margin-top:20px;">
+        <a href="${data.googleCalendarUrl}" style="display:inline-block; background:#2563eb; color:#fff; padding:10px 16px; border-radius:8px; font-weight:700; text-decoration:none;">
+          Agregar a Google Calendar
+        </a>
+      </div>
+      <p style="margin-top:10px; color:#475569; font-size:13px;">
+        Si el botón no funciona, copiá este enlace:
+        <a href="${data.googleCalendarUrl}" style="color:#2563eb;">Abrir Google Calendar</a>
+      </p>
+    ` : ''}
+  `;
+
+  return {
+    subject: `Solicitud confirmada - ${data.vehicleLabel}`,
+    html: baseLayout('Solicitud confirmada', body, data.settings),
+    text: `Hola ${data.clientName}\nTu solicitud fue confirmada.\nFecha y hora: ${new Date(data.confirmedAt).toLocaleString()}\nVehículo: ${data.vehicleLabel}\n${data.settings.address ? `Dirección: ${data.settings.address}\n` : ''}${data.googleCalendarUrl ? `Agregar a Google Calendar: ${data.googleCalendarUrl}` : ''}`,
+  };
+};
+
+export const appointmentRequestRejectedTemplate = (data: {
+  clientName: string;
+  vehicleLabel: string;
+  rejectionReason: string;
+  settings: ShopSettings;
+}) => {
+  const body = `
+    <p>Hola ${data.clientName},</p>
+    <p>Tu solicitud fue <strong>rechazada</strong>.</p>
+    <p style="margin-top:12px;"><strong>Motivo:</strong> ${data.rejectionReason}</p>
+    <p style="margin-top:12px;">Si querés, podés responder este mensaje para coordinarmos una alternativa.</p>
+    <p><strong>Vehículo:</strong> ${data.vehicleLabel}</p>
+  `;
+
+  return {
+    subject: `Solicitud rechazada - ${data.vehicleLabel}`,
+    html: baseLayout('Solicitud rechazada', body, data.settings),
+    text: `Hola ${data.clientName}\nTu solicitud fue rechazada.\nMotivo: ${data.rejectionReason}\nVehículo: ${data.vehicleLabel}`,
+  };
+};

@@ -23,6 +23,37 @@ const normalizeItems = (items: any[] = []) =>
     unitPrice: Number(item?.unitPrice || 0),
   }));
 
+const parseDateBoundary = (
+  rawDate: unknown,
+  boundary: 'start' | 'end',
+) => {
+  if (!rawDate) return null;
+  const raw = String(rawDate).trim();
+  if (!raw) return null;
+
+  const ymdMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let date: Date;
+  if (ymdMatch) {
+    const year = Number(ymdMatch[1]);
+    const month = Number(ymdMatch[2]) - 1;
+    const day = Number(ymdMatch[3]);
+    date =
+      boundary === 'start'
+        ? new Date(year, month, day, 0, 0, 0, 0)
+        : new Date(year, month, day, 23, 59, 59, 999);
+  } else {
+    date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return null;
+    if (boundary === 'start') {
+      date.setHours(0, 0, 0, 0);
+    } else {
+      date.setHours(23, 59, 59, 999);
+    }
+  }
+
+  return Number.isNaN(date.getTime()) ? null : date;
+};
+
 const extractCloudinaryPublicId = (url?: string) => {
   if (!url) return null;
   const match = url.match(/\/upload\/(?:v\d+\/)?(.+?)(?:\.\w+)?$/);
@@ -60,18 +91,12 @@ export const getWorkOrders = async (req: Request, res: Response) => {
   if (status) query.status = status;
   if (appointmentId) query.appointmentId = appointmentId;
   if (startDate || endDate) {
-    const start = startDate ? new Date(String(startDate)) : null;
-    const end = endDate ? new Date(String(endDate)) : null;
-    if (start && !Number.isNaN(start.getTime())) {
-      start.setHours(0, 0, 0, 0);
-    }
-    if (end && !Number.isNaN(end.getTime())) {
-      end.setHours(23, 59, 59, 999);
-    }
+    const start = parseDateBoundary(startDate, 'start');
+    const end = parseDateBoundary(endDate, 'end');
     if (start || end) {
       query.createdAt = {};
-      if (start && !Number.isNaN(start.getTime())) query.createdAt.$gte = start;
-      if (end && !Number.isNaN(end.getTime())) query.createdAt.$lte = end;
+      if (start) query.createdAt.$gte = start;
+      if (end) query.createdAt.$lte = end;
     }
   }
 

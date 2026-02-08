@@ -5,7 +5,7 @@ const estimateSchema = new mongoose.Schema({
   clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
   appointmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment' },
   workOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'WorkOrder' },
-  number: { type: String, required: true }, // e.g., "P-0001"
+  number: { type: String, required: true, unique: true, index: true }, // e.g., "P-0001"
   pdfUrl: { type: String },
   status: { type: String, enum: ['DRAFT', 'SENT', 'ACCEPTED', 'REJECTED'], default: 'DRAFT' },
   items: [{
@@ -27,7 +27,7 @@ const invoiceSchema = new mongoose.Schema({
   vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
   clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
   workOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'WorkOrder' },
-  number: { type: String, required: true }, // e.g., "A-0001"
+  number: { type: String, required: true, unique: true, index: true }, // e.g., "A-0001"
   pdfUrl: { type: String },
   items: [{
     description: { type: String },

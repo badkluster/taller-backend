@@ -1,6 +1,12 @@
 import Agenda from 'agenda';
 import { logger } from './logger';
-import { processMaintenanceReminders } from './cronProcessor';
+import {
+  processMaintenanceReminders,
+  processReminders,
+  rescheduleOverdueAppointments,
+  sendDayBeforeAppointmentReminders,
+  sendOwnerDailySummary,
+} from './cronProcessor';
 
 let agenda: Agenda | null = null;
 
@@ -21,6 +27,26 @@ const getAgenda = () => {
     logger.info({ results }, 'Maintenance reminders job completed');
   });
 
+  agenda.define('reschedule-overdue-appointments', async () => {
+    const results = await rescheduleOverdueAppointments();
+    logger.info({ results }, 'Reschedule overdue appointments job completed');
+  });
+
+  agenda.define('owner-daily-summary', async () => {
+    const results = await sendOwnerDailySummary();
+    logger.info({ results }, 'Owner daily summary job completed');
+  });
+
+  agenda.define('appointment-reminders', async () => {
+    const results = await processReminders();
+    logger.info({ results }, 'Appointment reminders job completed');
+  });
+
+  agenda.define('day-before-appointment-reminders', async () => {
+    const results = await sendDayBeforeAppointmentReminders();
+    logger.info({ results }, 'Day-before appointment reminders job completed');
+  });
+
   return agenda;
 };
 
@@ -34,10 +60,25 @@ export const startAgenda = async () => {
   await instance.start();
 
   const cron = process.env.AGENDA_MAINTENANCE_CRON || '0 9 * * *';
+  const remindersCron = process.env.AGENDA_PROCESS_REMINDERS_CRON || '*/15 * * * *';
+  const dayBeforeRemindersCron =
+    process.env.AGENDA_DAY_BEFORE_REMINDERS_CRON || '0 22 * * *';
+  const overdueCron = process.env.AGENDA_OVERDUE_CRON || '15 0 * * *';
+  const ownerSummaryCron = process.env.AGENDA_OWNER_SUMMARY_CRON || '0 7 * * *';
   const tz = process.env.AGENDA_TZ || 'America/Argentina/Buenos_Aires';
+  const runningOnVercel = process.env.VERCEL === '1';
 
   await instance.every(cron, 'maintenance-reminders', {}, { timezone: tz, skipImmediate: true });
-  logger.info({ cron, tz }, 'Agenda scheduled maintenance reminders');
+  if (!runningOnVercel) {
+    await instance.every(remindersCron, 'appointment-reminders', {}, { timezone: tz, skipImmediate: true });
+    await instance.every(dayBeforeRemindersCron, 'day-before-appointment-reminders', {}, { timezone: tz, skipImmediate: true });
+    await instance.every(overdueCron, 'reschedule-overdue-appointments', {}, { timezone: tz, skipImmediate: true });
+    await instance.every(ownerSummaryCron, 'owner-daily-summary', {}, { timezone: tz, skipImmediate: true });
+  }
+  logger.info(
+    { cron, remindersCron, dayBeforeRemindersCron, overdueCron, ownerSummaryCron, tz, runningOnVercel },
+    'Agenda scheduled recurring jobs',
+  );
 };
 
 export const stopAgenda = async () => {

@@ -149,15 +149,6 @@ export const updateAppointment = async (req: Request, res: Response) => {
   const appointment = await Appointment.findById(req.params.id);
 
   if (appointment) {
-    if (req.body.status === 'COMPLETED') {
-      const workOrder = await WorkOrder.findOne({ appointmentId: appointment._id });
-      const inactiveStatuses = new Set(['COMPLETADA', 'CANCELADA', 'CLOSED']);
-      if (!workOrder || inactiveStatuses.has(workOrder.status)) {
-        res.status(400);
-        throw new Error('No se puede completar el turno sin una Orden de Trabajo activa');
-      }
-    }
-
     if (req.body.startAt) {
       const startDate = new Date(req.body.startAt);
       const dayStart = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate(), 0, 0, 0, 0);

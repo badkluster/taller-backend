@@ -1,5 +1,7 @@
 import { Request, Response } from 'express';
+import type { Model } from 'mongoose';
 import { Estimate, Invoice } from '../models/Finance';
+import Sequence from '../models/Sequence';
 import WorkOrder from '../models/WorkOrder';
 import Vehicle from '../models/Vehicle';
 import Client from '../models/Client';
@@ -68,6 +70,55 @@ const deleteCloudinaryAsset = async (url?: string | null) => {
     }
   }
 };
+
+const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const getMaxUsedSequence = async (model: Model<any>, prefix: string) => {
+  const escapedPrefix = escapeRegex(prefix);
+  const [maxRow] = await model.aggregate([
+    { $match: { number: { $regex: `^${escapedPrefix}[0-9]+$` } } },
+    {
+      $project: {
+        numericValue: {
+          $toInt: { $substrCP: ['$number', prefix.length, -1] },
+        },
+      },
+    },
+    { $sort: { numericValue: -1 } },
+    { $limit: 1 },
+  ]);
+
+  return Number(maxRow?.numericValue || 0);
+};
+
+const getNextDocumentNumber = async (
+  model: Model<any>,
+  sequenceKey: string,
+  prefix: string,
+) => {
+  const maxUsedValue = await getMaxUsedSequence(model, prefix);
+
+  await Sequence.findOneAndUpdate(
+    { key: sequenceKey },
+    {
+      $setOnInsert: { key: sequenceKey, value: 0 },
+      $max: { value: maxUsedValue },
+    },
+    { upsert: true, setDefaultsOnInsert: true },
+  );
+
+  const sequence = await Sequence.findOneAndUpdate(
+    { key: sequenceKey },
+    { $inc: { value: 1 } },
+    { new: true },
+  );
+
+  if (!sequence) {
+    throw new Error(`No se pudo generar numeración para ${sequenceKey}`);
+  }
+
+  return `${prefix}${String(sequence.value).padStart(4, '0')}`;
+};
 // PDF Generation Placeholder - in real app use pdfkit/pdfmake here
 // import { generatePDF } from '../utils/pdfGenerator';
 
@@ -97,10 +148,7 @@ export const createEstimate = async (req: Request, res: Response) => {
     throw new Error('vehicleId y clientId son requeridos');
   }
 
-  // Generate Number (P-0001 usually requires querying last)
-  const lastEstimate = await Estimate.findOne().sort({ createdAt: -1 });
-  const lastNumber = lastEstimate ? parseInt(lastEstimate.number.replace('P-', '')) : 0;
-  const number = `P-${String(lastNumber + 1).padStart(4, '0')}`;
+  const number = await getNextDocumentNumber(Estimate as any, 'estimate_number', 'P-');
 
   const baseItems = Array.isArray(items) && items.length ? items : (workOrderDoc?.items || []);
   const estimateItems = (baseItems || []).map((item: any) => ({
@@ -250,10 +298,7 @@ export const createInvoice = async (req: Request, res: Response) => {
     ? Number(req.body.total)
     : (itemsTotal + laborCost - discount);
 
-  // Generate Number (A-0001)
-  const lastInvoice = await Invoice.findOne().sort({ createdAt: -1 });
-  const lastNumber = lastInvoice ? parseInt(lastInvoice.number.replace('A-', '')) : 0;
-  const number = `A-${String(lastNumber + 1).padStart(4, '0')}`;
+  const number = await getNextDocumentNumber(Invoice as any, 'invoice_number', 'A-');
 
   const invoice = await Invoice.create({
     vehicleId: workOrder.vehicleId,

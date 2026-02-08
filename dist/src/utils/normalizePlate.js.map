@@ -1,0 +1,1 @@
+{"version":3,"file":"normalizePlate.js","sourceRoot":"","sources":["../../../src/utils/normalizePlate.ts"],"names":[],"mappings":";;;AAAO,MAAM,cAAc,GAAG,CAAC,KAAa,EAAU,EAAE;IACtD,IAAI,CAAC,KAAK;QAAE,OAAO,EAAE,CAAC;IAEtB,OAAO,KAAK,CAAC,OAAO,CAAC,eAAe,EAAE,EAAE,CAAC,CAAC,WAAW,EAAE,CAAC;AAC1D,CAAC,CAAC;AAJW,QAAA,cAAc,kBAIzB"}

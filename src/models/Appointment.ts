@@ -14,6 +14,8 @@ const appointmentSchema = new mongoose.Schema({
   notes: { type: String },
   assignedToUserId: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   cancelReason: { type: String },
+  dayBeforeReminderSentAt: { type: Date },
+  dayBeforeReminderForDate: { type: String },
   createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
 }, {
   timestamps: true,
