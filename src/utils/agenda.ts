@@ -64,7 +64,7 @@ export const startAgenda = async () => {
   const dayBeforeRemindersCron =
     process.env.AGENDA_DAY_BEFORE_REMINDERS_CRON || '0 22 * * *';
   const overdueCron = process.env.AGENDA_OVERDUE_CRON || '15 0 * * *';
-  const ownerSummaryCron = process.env.AGENDA_OWNER_SUMMARY_CRON || '0 7 * * *';
+  const ownerSummaryCron = process.env.AGENDA_OWNER_SUMMARY_CRON || '5 6 * * *';
   const tz = process.env.AGENDA_TZ || 'America/Argentina/Buenos_Aires';
   const runningOnVercel = process.env.VERCEL === '1';
 

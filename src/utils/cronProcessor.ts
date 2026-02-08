@@ -150,6 +150,39 @@ const resolveOwnerNotificationEmail = (settings?: { emailFrom?: string | null })
 const mapRequestTypeToLabel = (requestType: string) =>
   requestType === 'repair' ? 'Reparacion' : 'Diagnostico / Presupuesto';
 
+const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
+  SCHEDULED: 'Programado',
+  CONFIRMED: 'Confirmado',
+  IN_PROGRESS: 'En proceso',
+  COMPLETED: 'Completado',
+  CANCELLED: 'Cancelado',
+  NO_SHOW: 'Ausente',
+};
+
+const APPOINTMENT_STATUS_BADGE_STYLES: Record<string, string> = {
+  SCHEDULED: 'background-color: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd;',
+  CONFIRMED: 'background-color: #dcfce7; color: #166534; border: 1px solid #86efac;',
+  IN_PROGRESS: 'background-color: #fef3c7; color: #92400e; border: 1px solid #fcd34d;',
+  COMPLETED: 'background-color: #ccfbf1; color: #0f766e; border: 1px solid #99f6e4;',
+  CANCELLED: 'background-color: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;',
+  NO_SHOW: 'background-color: #e5e7eb; color: #374151; border: 1px solid #d1d5db;',
+};
+
+const mapAppointmentStatusToLabel = (status: string) =>
+  APPOINTMENT_STATUS_LABELS[status] || status;
+
+const resolveAppointmentStatusBadgeStyle = (status: string) =>
+  APPOINTMENT_STATUS_BADGE_STYLES[status] ||
+  'background-color: #e2e8f0; color: #334155; border: 1px solid #cbd5e1;';
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+
 const toLocalDateKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 
@@ -417,6 +450,25 @@ export const sendOwnerDailySummary = async () => {
     year: 'numeric',
   });
 
+  const buildSummaryCard = (params: {
+    label: string;
+    value: number;
+    backgroundColor: string;
+    borderColor: string;
+    textColor: string;
+  }) => `
+    <td style="width: 25%; padding: 0;">
+      <div style="padding: 12px 10px; border-radius: 12px; border: 1px solid ${params.borderColor}; background: ${params.backgroundColor}; text-align: center;">
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; color: ${params.textColor}; opacity: 0.9;">
+          ${params.label}
+        </div>
+        <div style="font-size: 22px; font-weight: 800; color: ${params.textColor}; margin-top: 4px;">
+          ${params.value}
+        </div>
+      </div>
+    </td>
+  `;
+
   const appointmentItems = appointments
     .map((appointment) => {
       const client = appointment.clientId as any;
@@ -429,8 +481,22 @@ export const sendOwnerDailySummary = async () => {
       const slot = new Date(appointment.startAt).toLocaleTimeString('es-AR', {
         hour: '2-digit',
         minute: '2-digit',
+        hour12: true,
       });
-      return `<li><strong>${slot}</strong> - ${clientName}${vehicleLabel ? ` (${vehicleLabel})` : ''} - ${appointment.status}</li>`;
+      const statusLabel = mapAppointmentStatusToLabel(appointment.status);
+      const statusStyle = resolveAppointmentStatusBadgeStyle(appointment.status);
+
+      return `
+        <li style="margin: 0 0 10px; padding: 0 0 10px; border-bottom: 1px solid #e2e8f0;">
+          <div style="margin: 0 0 4px;">
+            <span style="display: inline-block; min-width: 74px; font-weight: 700; color: #0f172a;">${escapeHtml(slot)}</span>
+            <span style="color: #1e293b;">${escapeHtml(clientName)}${vehicleLabel ? ` (${escapeHtml(vehicleLabel)})` : ''}</span>
+          </div>
+          <span style="display: inline-block; border-radius: 999px; font-size: 12px; font-weight: 700; padding: 3px 10px; ${statusStyle}">
+            ${escapeHtml(statusLabel)}
+          </span>
+        </li>
+      `;
     })
     .join('');
 
@@ -448,24 +514,76 @@ export const sendOwnerDailySummary = async () => {
         .map((date: Date) => new Date(date).toLocaleDateString('es-AR'))
         .join(', ');
 
-      return `<li><strong>${request.clientName}</strong>${vehicleLabel ? ` - ${vehicleLabel}` : ''} - ${mapRequestTypeToLabel(request.requestType)}${suggested ? ` - Sugiere: ${suggested}` : ''}</li>`;
+      return `
+        <li style="margin: 0 0 10px; padding: 0 0 10px; border-bottom: 1px solid #e2e8f0; color: #1e293b;">
+          <strong>${escapeHtml(request.clientName)}</strong>${vehicleLabel ? ` - ${escapeHtml(vehicleLabel)}` : ''}
+          <br />
+          <span>${escapeHtml(mapRequestTypeToLabel(request.requestType))}</span>
+          ${suggested ? `<span style="color: #475569;"> - Fechas sugeridas: ${escapeHtml(suggested)}</span>` : ''}
+        </li>
+      `;
     })
     .join('');
 
   const html = `
-    <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.5;">
-      <h2 style="margin: 0 0 10px;">Resumen diario del taller</h2>
-      <p style="margin: 0 0 16px;">${dayLabel}</p>
-      <p style="margin: 0 0 12px;">
-        Turnos de hoy: <strong>${appointments.length}</strong> |
-        Confirmados: <strong>${statusTotals.confirmed}</strong> |
-        En proceso: <strong>${statusTotals.inProgress}</strong> |
-        Programados: <strong>${statusTotals.scheduled}</strong>
-      </p>
-      <h3 style="margin: 18px 0 8px;">Agenda de hoy</h3>
-      ${appointmentItems ? `<ul style="margin: 0; padding-left: 18px;">${appointmentItems}</ul>` : '<p style="margin: 0;">Sin turnos para hoy.</p>'}
-      <h3 style="margin: 18px 0 8px;">Solicitudes pendientes (${pendingRequests.length})</h3>
-      ${pendingRequestItems ? `<ul style="margin: 0; padding-left: 18px;">${pendingRequestItems}</ul>` : '<p style="margin: 0;">No hay solicitudes pendientes.</p>'}
+    <div style="margin: 0; padding: 22px 0; background: #eef2f7;">
+      <div style="max-width: 720px; margin: 0 auto; padding: 0 12px;">
+        <div style="background: #ffffff; border: 1px solid #dbe3ee; border-radius: 16px; overflow: hidden;">
+          <div style="padding: 22px 24px; background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%); color: #ffffff;">
+            <h2 style="margin: 0; font-size: 24px; line-height: 1.2;">Resumen diario del taller</h2>
+            <p style="margin: 8px 0 0; font-size: 14px; opacity: 0.95;">${escapeHtml(dayLabel)}</p>
+          </div>
+
+          <div style="padding: 18px 20px 22px; font-family: 'Segoe UI', Arial, sans-serif; color: #0f172a; line-height: 1.5;">
+            <table role="presentation" width="100%" style="border-collapse: separate; border-spacing: 8px; margin: 0 0 16px;">
+              <tr>
+                ${buildSummaryCard({
+                  label: 'Turnos hoy',
+                  value: appointments.length,
+                  backgroundColor: '#e0f2fe',
+                  borderColor: '#7dd3fc',
+                  textColor: '#0c4a6e',
+                })}
+                ${buildSummaryCard({
+                  label: 'Confirmados',
+                  value: statusTotals.confirmed,
+                  backgroundColor: '#dcfce7',
+                  borderColor: '#86efac',
+                  textColor: '#166534',
+                })}
+                ${buildSummaryCard({
+                  label: 'En proceso',
+                  value: statusTotals.inProgress,
+                  backgroundColor: '#fef3c7',
+                  borderColor: '#fcd34d',
+                  textColor: '#92400e',
+                })}
+                ${buildSummaryCard({
+                  label: 'Programados',
+                  value: statusTotals.scheduled,
+                  backgroundColor: '#dbeafe',
+                  borderColor: '#93c5fd',
+                  textColor: '#1d4ed8',
+                })}
+              </tr>
+            </table>
+
+            <h3 style="margin: 0 0 8px; font-size: 18px;">Agenda de hoy</h3>
+            ${
+              appointmentItems
+                ? `<ul style="margin: 0; padding: 0 0 0 18px;">${appointmentItems}</ul>`
+                : '<p style="margin: 0 0 16px; color: #475569;">Sin turnos para hoy.</p>'
+            }
+
+            <h3 style="margin: 16px 0 8px; font-size: 18px;">Solicitudes pendientes (${pendingRequests.length})</h3>
+            ${
+              pendingRequestItems
+                ? `<ul style="margin: 0; padding: 0 0 0 18px;">${pendingRequestItems}</ul>`
+                : '<p style="margin: 0; color: #475569;">No hay solicitudes pendientes.</p>'
+            }
+          </div>
+        </div>
+      </div>
     </div>
   `;
 
@@ -481,8 +599,10 @@ export const sendOwnerDailySummary = async () => {
       const slot = new Date(appointment.startAt).toLocaleTimeString('es-AR', {
         hour: '2-digit',
         minute: '2-digit',
+        hour12: true,
       });
-      return `- ${slot} ${clientName}${vehicleLabel ? ` (${vehicleLabel})` : ''} [${appointment.status}]`;
+      const statusLabel = mapAppointmentStatusToLabel(appointment.status);
+      return `- ${slot} ${clientName}${vehicleLabel ? ` (${vehicleLabel})` : ''} [${statusLabel}]`;
     })
     .join('\n');
 
