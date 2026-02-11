@@ -5,6 +5,7 @@ import {
   processReminders,
   rescheduleOverdueAppointments,
   sendDayBeforeAppointmentReminders,
+  sendMonthlyPrepaidReminders,
   sendOwnerDailySummary,
 } from './cronProcessor';
 
@@ -47,6 +48,11 @@ const getAgenda = () => {
     logger.info({ results }, 'Day-before appointment reminders job completed');
   });
 
+  agenda.define('monthly-prepaid-reminders', async () => {
+    const results = await sendMonthlyPrepaidReminders();
+    logger.info({ results }, 'Monthly prepaid reminders job completed');
+  });
+
   return agenda;
 };
 
@@ -65,6 +71,8 @@ export const startAgenda = async () => {
     process.env.AGENDA_DAY_BEFORE_REMINDERS_CRON || '0 22 * * *';
   const overdueCron = process.env.AGENDA_OVERDUE_CRON || '15 0 * * *';
   const ownerSummaryCron = process.env.AGENDA_OWNER_SUMMARY_CRON || '5 6 * * *';
+  const prepaidRemindersCron =
+    process.env.AGENDA_PREPAID_REMINDER_CRON || '0 10 * * *';
   const tz = process.env.AGENDA_TZ || 'America/Argentina/Buenos_Aires';
   const runningOnVercel = process.env.VERCEL === '1';
 
@@ -74,9 +82,10 @@ export const startAgenda = async () => {
     await instance.every(dayBeforeRemindersCron, 'day-before-appointment-reminders', {}, { timezone: tz, skipImmediate: true });
     await instance.every(overdueCron, 'reschedule-overdue-appointments', {}, { timezone: tz, skipImmediate: true });
     await instance.every(ownerSummaryCron, 'owner-daily-summary', {}, { timezone: tz, skipImmediate: true });
+    await instance.every(prepaidRemindersCron, 'monthly-prepaid-reminders', {}, { timezone: tz, skipImmediate: true });
   }
   logger.info(
-    { cron, remindersCron, dayBeforeRemindersCron, overdueCron, ownerSummaryCron, tz, runningOnVercel },
+    { cron, remindersCron, dayBeforeRemindersCron, overdueCron, ownerSummaryCron, prepaidRemindersCron, tz, runningOnVercel },
     'Agenda scheduled recurring jobs',
   );
 };

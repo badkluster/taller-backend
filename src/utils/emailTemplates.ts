@@ -6,6 +6,7 @@ type ShopSettings = {
   phone?: string;
   emailFrom?: string;
   logoUrl?: string;
+  websiteUrl?: string;
 };
 
 const escapeHtml = (value?: string | null) =>
@@ -23,8 +24,44 @@ const formatCurrency = (value: number) =>
     maximumFractionDigits: 0,
   }).format(value);
 
+const renderMultilineParagraphs = (value?: string | null) => {
+  const normalized = String(value || "").trim();
+  if (!normalized) return "";
+
+  return normalized
+    .split(/\n{2,}/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean)
+    .map(
+      (paragraph) =>
+        `<p style="margin:0 0 10px; color:#334155; line-height:1.6;">${escapeHtml(
+          paragraph,
+        ).replace(/\n/g, "<br/>")}</p>`,
+    )
+    .join("");
+};
+
+const normalizeWebsiteUrl = (value?: string | null) => {
+  const trimmed = String(value || "").trim();
+  if (!trimmed) return "";
+  if (/^https?:\/\//i.test(trimmed)) {
+    return trimmed.replace(/\/+$/, "");
+  }
+  return `https://${trimmed.replace(/^\/+/, "").replace(/\/+$/, "")}`;
+};
+
+const resolveWebsiteUrl = (settings: ShopSettings) => {
+  const fromSettings = normalizeWebsiteUrl(settings.websiteUrl);
+  if (fromSettings) return fromSettings;
+  return normalizeWebsiteUrl(
+    process.env.FRONTEND_URL || process.env.APP_BASE_URL || "",
+  );
+};
+
 const baseLayout = (title: string, body: string, settings: ShopSettings) => {
   const logoUrl = resolveLogoUrl(settings.logoUrl);
+  const websiteUrl = resolveWebsiteUrl(settings);
+  const safeWebsiteUrl = escapeHtml(websiteUrl);
   const logoHtml = logoUrl
     ? `<img src="${logoUrl}" alt="${settings.shopName || "Taller Mecánico"}" style="height:40px; max-width:140px; object-fit:contain;" />`
     : "";
@@ -48,6 +85,11 @@ const baseLayout = (title: string, body: string, settings: ShopSettings) => {
       <div style="padding:16px 24px; background:#f1f5f9; font-size:12px; color:#475569;">
         <div>📞 ${settings.phone || "Sin teléfono"}</div>
         <div>✉️ ${settings.emailFrom || ""}</div>
+        ${
+          websiteUrl
+            ? `<div>🌐 <a href="${safeWebsiteUrl}" style="color:#2563eb; text-decoration:none;">${safeWebsiteUrl}</a></div>`
+            : ""
+        }
       </div>
     </div>
   </div>
@@ -131,20 +173,130 @@ export const invoiceEmailTemplate = (data: {
   pdfUrl?: string;
   clientName: string;
   vehicleLabel: string;
+  prepaidApplied?: number;
+  invoiceType?: "WORK_ORDER" | "PREPAID_DEPOSIT";
   settings: ShopSettings;
 }) => {
+  const prepaidApplied = Number(data.prepaidApplied || 0);
+  const invoiceType = data.invoiceType || "WORK_ORDER";
+  const isPrepaidDeposit = invoiceType === "PREPAID_DEPOSIT";
+  const intro = isPrepaidDeposit
+    ? `Adjuntamos la factura de la carga de saldo a favor registrada para tu cuenta.`
+    : `Adjuntamos la factura correspondiente al trabajo realizado en tu vehículo <strong>${data.vehicleLabel}</strong>.`;
+  const supportiveText = isPrepaidDeposit
+    ? `<p style="font-size:14px; color:#0f172a;">Este importe queda disponible como <strong>saldo a favor</strong> para futuros servicios o reparaciones.</p>`
+    : "";
+  const title = isPrepaidDeposit
+    ? "Factura de saldo a favor"
+    : "Factura";
+  const textLines = [
+    `Hola ${data.clientName}`,
+    `Factura ${data.invoiceNumber}`,
+    isPrepaidDeposit
+      ? "Tipo: Carga de saldo a favor"
+      : `Vehículo: ${data.vehicleLabel}`,
+    `Total: ${formatCurrency(data.total)}`,
+    prepaidApplied > 0
+      ? `Saldo a favor aplicado: ${formatCurrency(prepaidApplied)}`
+      : "",
+    data.pdfUrl ? `PDF: ${data.pdfUrl}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
   const body = `
     <p>Hola ${data.clientName},</p>
-    <p>Adjuntamos la factura correspondiente al trabajo realizado en tu vehículo <strong>${data.vehicleLabel}</strong>.</p>
+    <p>${intro}</p>
+    ${supportiveText}
+    ${prepaidApplied > 0 ? `<p style="font-size:14px; color:#0f172a;">Saldo a favor aplicado: <strong>${formatCurrency(prepaidApplied)}</strong></p>` : ""}
     <p style="font-size:18px; font-weight:700; color:#0f172a;">Total: ${formatCurrency(data.total)}</p>
     ${data.pdfUrl ? `<p><a href="${data.pdfUrl}" style="color:#2563eb; font-weight:700;">Descargar PDF</a></p>` : ""}
     <p>Gracias por confiar en nosotros.</p>
   `;
 
   return {
-    subject: `Factura ${data.invoiceNumber} - ${data.vehicleLabel}`,
-    html: baseLayout("Factura", body, data.settings),
-    text: `Hola ${data.clientName}\nFactura ${data.invoiceNumber}\nVehículo: ${data.vehicleLabel}\nTotal: ${formatCurrency(data.total)}\n${data.pdfUrl ? `PDF: ${data.pdfUrl}` : ""}`,
+    subject: isPrepaidDeposit
+      ? `Factura ${data.invoiceNumber} - Saldo a favor`
+      : `Factura ${data.invoiceNumber} - ${data.vehicleLabel}`,
+    html: baseLayout(title, body, data.settings),
+    text: textLines,
+  };
+};
+
+export const prepaidOfferEmailTemplate = (data: {
+  subject: string;
+  clientName: string;
+  customBody?: string;
+  balance?: number;
+  settings: ShopSettings;
+}) => {
+  const safeClientName = escapeHtml(data.clientName);
+  const customBodyHtml = renderMultilineParagraphs(data.customBody);
+  const hasCustomBody = Boolean(customBodyHtml);
+  const balance = Number(data.balance || 0);
+  const balanceBlock =
+    balance > 0
+      ? `<div style="margin:0 0 16px; padding:12px 14px; border-radius:10px; background:#ecfeff; border:1px solid #a5f3fc;">
+          <div style="font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#155e75; font-weight:700;">Saldo actual a favor</div>
+          <div style="margin-top:4px; font-size:20px; font-weight:800; color:#0f766e;">${formatCurrency(balance)}</div>
+        </div>`
+      : "";
+
+  const defaultBody = `
+    <p style="margin:0 0 10px; color:#334155; line-height:1.6;">
+      Queremos ofrecerte un beneficio opcional para que puedas anticiparte a futuros mantenimientos.
+    </p>
+    <p style="margin:0 0 10px; color:#334155; line-height:1.6;">
+      Podés ir cargando saldo cuando te resulte cómodo y usarlo luego en services o reparaciones.
+    </p>
+  `;
+
+  const body = `
+    <div style="margin-bottom:14px;">
+      <span style="display:inline-block; padding:6px 10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:999px; color:#1d4ed8; font-size:12px; font-weight:700;">
+        Beneficio opcional
+      </span>
+    </div>
+    <p style="margin:0 0 14px; color:#0f172a;">Hola ${safeClientName},</p>
+    <div style="border:1px solid #dbeafe; border-radius:12px; background:#f8fbff; padding:14px; margin:0 0 16px;">
+      <div style="font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#64748b; margin-bottom:4px;">
+        Saldo a favor para futuros servicios
+      </div>
+      <div style="font-size:20px; font-weight:800; color:#0f172a; margin-bottom:8px;">
+        Planificá gastos del auto con más tranquilidad
+      </div>
+      ${hasCustomBody ? customBodyHtml : defaultBody}
+      <ul style="margin:0; padding-left:18px; color:#334155; line-height:1.6;">
+        <li>Sin obligación mensual ni débito automático.</li>
+        <li>Podés cargar montos parciales cuando quieras.</li>
+        <li>El saldo queda registrado y disponible para usar en facturas futuras.</li>
+      </ul>
+    </div>
+    ${balanceBlock}
+    <p style="margin:0; color:#475569; font-size:13px;">
+      Si tenés dudas, respondé este email y te ayudamos.
+    </p>
+  `;
+
+  const textLines = [
+    `Hola ${data.clientName},`,
+    "",
+    "Beneficio opcional: saldo a favor para futuros servicios.",
+    hasCustomBody
+      ? String(data.customBody || "").trim()
+      : "Podés cargar saldo cuando quieras y usarlo más adelante en services o reparaciones.",
+    "",
+    balance > 0 ? `Saldo actual a favor: ${formatCurrency(balance)}` : "",
+    "Sin obligación mensual.",
+    "Podés responder este email para coordinar.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    subject: data.subject,
+    html: baseLayout("Beneficio opcional", body, data.settings),
+    text: textLines,
   };
 };
 
@@ -193,20 +345,110 @@ export const appointmentRequestRejectedTemplate = (data: {
   clientName: string;
   vehicleLabel: string;
   rejectionReason: string;
+  followUpText?: string;
+  requestUrl?: string;
+  requestUrlLabel?: string;
   settings: ShopSettings;
 }) => {
+  const safeClientName = escapeHtml(data.clientName);
+  const safeVehicleLabel = escapeHtml(data.vehicleLabel);
+  const safeRejectionReason = escapeHtml(data.rejectionReason);
+  const safeFollowUpText = escapeHtml(
+    data.followUpText ||
+      "Si querés, podés responder este mensaje para coordinar una alternativa.",
+  );
+  const safeRequestUrl = escapeHtml(data.requestUrl || "");
+  const safeRequestUrlLabel = escapeHtml(
+    data.requestUrlLabel || "Solicitar turno",
+  );
+
   const body = `
-    <p>Hola ${data.clientName},</p>
+    <p>Hola ${safeClientName},</p>
     <p>Tu solicitud fue <strong>rechazada</strong>.</p>
-    <p style="margin-top:12px;"><strong>Motivo:</strong> ${data.rejectionReason}</p>
-    <p style="margin-top:12px;">Si querés, podés responder este mensaje para coordinar una alternativa.</p>
-    <p><strong>Vehículo:</strong> ${data.vehicleLabel}</p>
+    <p style="margin-top:12px;"><strong>Motivo:</strong> ${safeRejectionReason}</p>
+    <p style="margin-top:12px;">${safeFollowUpText}</p>
+    ${
+      data.requestUrl
+        ? `
+    <div style="margin-top:14px;">
+      <a href="${safeRequestUrl}" style="display:inline-block; background:#2563eb; color:#ffffff; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:700;">
+        ${safeRequestUrlLabel}
+      </a>
+    </div>
+  `
+        : ""
+    }
+    <p><strong>Vehículo:</strong> ${safeVehicleLabel}</p>
   `;
 
   return {
     subject: `Solicitud rechazada - ${data.vehicleLabel}`,
     html: baseLayout("Solicitud rechazada", body, data.settings),
-    text: `Hola ${data.clientName}\nTu solicitud fue rechazada.\nMotivo: ${data.rejectionReason}\nVehículo: ${data.vehicleLabel}`,
+    text: `Hola ${data.clientName}\nTu solicitud fue rechazada.\nMotivo: ${data.rejectionReason}\n${data.followUpText || "Si querés, podés responder este mensaje para coordinar una alternativa."}\n${data.requestUrl ? `${data.requestUrlLabel || "Solicitar turno"}: ${data.requestUrl}\n` : ""}Vehículo: ${data.vehicleLabel}`,
+  };
+};
+
+export const appointmentCancelledTemplate = (data: {
+  clientName: string;
+  vehicleLabel: string;
+  scheduledAt?: Date;
+  cancelReason?: string;
+  followUpText?: string;
+  requestUrl?: string;
+  requestUrlLabel?: string;
+  settings: ShopSettings;
+}) => {
+  const safeClientName = escapeHtml(data.clientName);
+  const safeVehicleLabel = escapeHtml(data.vehicleLabel);
+  const safeCancelReason = escapeHtml(data.cancelReason || "");
+  const safeFollowUpText = escapeHtml(
+    data.followUpText ||
+      "Podés solicitar un nuevo turno cuando te quede cómodo desde el siguiente enlace.",
+  );
+  const safeRequestUrl = escapeHtml(data.requestUrl || "");
+  const safeRequestUrlLabel = escapeHtml(
+    data.requestUrlLabel || "Solicitar nuevo turno",
+  );
+  const scheduledAtDate = data.scheduledAt ? new Date(data.scheduledAt) : null;
+  const scheduledAtText =
+    scheduledAtDate && !Number.isNaN(scheduledAtDate.getTime())
+      ? scheduledAtDate.toLocaleString("es-AR")
+      : "";
+
+  const body = `
+    <p>Hola ${safeClientName},</p>
+    <p>Te informamos que tu turno fue <strong>cancelado</strong>.</p>
+    <table style="width:100%; border-collapse:collapse; font-size:14px;">
+      ${
+        scheduledAtText
+          ? `<tr><td style="padding:6px 0; color:#64748b;">Fecha y hora original</td><td style="padding:6px 0; font-weight:700;">${scheduledAtText}</td></tr>`
+          : ""
+      }
+      <tr><td style="padding:6px 0; color:#64748b;">Vehículo</td><td style="padding:6px 0;">${safeVehicleLabel}</td></tr>
+    </table>
+    ${
+      data.cancelReason
+        ? `<p style="margin-top:12px;"><strong>Motivo:</strong> ${safeCancelReason}</p>`
+        : ""
+    }
+    <p style="margin-top:12px;">${safeFollowUpText}</p>
+    ${
+      data.requestUrl
+        ? `
+      <div style="margin-top:14px;">
+        <a href="${safeRequestUrl}" style="display:inline-block; background:#2563eb; color:#ffffff; padding:10px 16px; border-radius:8px; text-decoration:none; font-weight:700;">
+          ${safeRequestUrlLabel}
+        </a>
+      </div>
+    `
+        : ""
+    }
+  `;
+
+  return {
+    subject: `Turno cancelado - ${data.vehicleLabel}`,
+    html: baseLayout("Turno cancelado", body, data.settings),
+    text: `Hola ${data.clientName}\nTu turno fue cancelado.\n${scheduledAtText ? `Fecha y hora original: ${scheduledAtText}\n` : ""}Vehículo: ${data.vehicleLabel}\n${data.cancelReason ? `Motivo: ${data.cancelReason}\n` : ""}${data.followUpText || "Podés solicitar un nuevo turno cuando te quede cómodo."}\n${data.requestUrl ? `${data.requestUrlLabel || "Solicitar nuevo turno"}: ${data.requestUrl}` : ""}`,
   };
 };
 

@@ -186,6 +186,7 @@ export const generateInvoicePdf = (data: {
   laborCost: number;
   discount: number;
   total: number;
+  prepaidApplied?: number;
   clientComment?: string;
   shopName?: string;
   address?: string;
@@ -227,13 +228,20 @@ export const generateInvoicePdf = (data: {
   const totalsY = doc.y;
   const boxWidth = 240;
   const boxX = doc.page.width - doc.page.margins.right - boxWidth;
-  doc.roundedRect(boxX, totalsY, boxWidth, 84, 10).fill('#0f172a');
+  const prepaidApplied = Number(data.prepaidApplied || 0);
+  const boxHeight = prepaidApplied > 0 ? 104 : 84;
+  doc.roundedRect(boxX, totalsY, boxWidth, boxHeight, 10).fill('#0f172a');
   doc.fillColor('#e2e8f0').fontSize(9).text('RESUMEN', boxX + 14, totalsY + 10);
   doc.fillColor('#ffffff').fontSize(11).text(`Mano de obra: ${formatCurrency(data.laborCost)}`, boxX + 14, totalsY + 26);
   if (data.discount > 0) {
     doc.text(`Descuento: -${formatCurrency(data.discount)}`, boxX + 14, totalsY + 42);
   }
-  doc.fontSize(14).text(`TOTAL: ${formatCurrency(data.total)}`, boxX + 14, totalsY + 60);
+  if (prepaidApplied > 0) {
+    doc.text(`Saldo a favor aplicado: -${formatCurrency(prepaidApplied)}`, boxX + 14, totalsY + 58);
+    doc.fontSize(14).text(`TOTAL FINAL: ${formatCurrency(data.total)}`, boxX + 14, totalsY + 78);
+  } else {
+    doc.fontSize(14).text(`TOTAL: ${formatCurrency(data.total)}`, boxX + 14, totalsY + 60);
+  }
 
   doc.moveDown(4.2);
   doc.fillColor('#475569').fontSize(9).text('Factura emitida por servicios de mantenimiento/reparación.', { align: 'center' });

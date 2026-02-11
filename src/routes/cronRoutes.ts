@@ -5,6 +5,7 @@ import {
   processReminders,
   rescheduleOverdueAppointments,
   sendOwnerDailySummary,
+  sendMonthlyPrepaidReminders,
 } from '../utils/cronProcessor';
 
 const router = express.Router();
@@ -81,6 +82,21 @@ router.get('/day-before-appointment-reminders', async (req, res) => {
 
   try {
     const results = await sendDayBeforeAppointmentReminders();
+    res.json({ success: true, results });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/prepaid-monthly-reminders', async (req, res) => {
+  const secret = req.headers['authorization'];
+  if (secret !== `Bearer ${process.env.CRON_SECRET}`) {
+    res.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const results = await sendMonthlyPrepaidReminders();
     res.json({ success: true, results });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

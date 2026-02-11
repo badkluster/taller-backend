@@ -7,6 +7,10 @@ const clientSchema = new mongoose.Schema({
   phone: { type: String, required: true, index: true },
   email: { type: String, index: true },
   notes: { type: String },
+  prepaidEligible: { type: Boolean, default: false, index: true },
+  prepaidBalance: { type: Number, default: 0, min: 0 },
+  prepaidLastReminderMonth: { type: String },
+  prepaidOfferSentAt: { type: Date },
 }, {
   timestamps: true,
 });
@@ -15,6 +19,9 @@ clientSchema.pre('validate', function normalizeClientIdentity(this: any) {
   if (this.firstName) this.firstName = String(this.firstName).trim();
   if (this.lastName) this.lastName = String(this.lastName).trim();
   if (this.notes !== undefined) this.notes = String(this.notes || '').trim();
+  if (this.prepaidLastReminderMonth !== undefined) {
+    this.prepaidLastReminderMonth = String(this.prepaidLastReminderMonth || '').trim();
+  }
 
   if (this.phone !== undefined) {
     this.phone = normalizeClientPhone(this.phone);

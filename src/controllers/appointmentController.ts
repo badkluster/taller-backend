@@ -4,7 +4,10 @@ import Vehicle from '../models/Vehicle';
 import Client from '../models/Client';
 import Settings from '../models/Settings';
 import { sendEmail } from '../utils/mailer';
-import { appointmentCreatedTemplate } from '../utils/emailTemplates';
+import {
+  appointmentCancelledTemplate,
+  appointmentCreatedTemplate,
+} from '../utils/emailTemplates';
 import WorkOrder from '../models/WorkOrder';
 import { Estimate } from '../models/Finance';
 
@@ -15,6 +18,15 @@ const isRepairServiceType = (serviceType?: string) =>
 
 const WORKSHOP_TIME_ZONE =
   process.env.WORKSHOP_TIME_ZONE || 'America/Argentina/Buenos_Aires';
+const resolveFrontendBaseUrl = () =>
+  String(process.env.FRONTEND_URL || process.env.APP_BASE_URL || '')
+    .trim()
+    .replace(/\/+$/, '');
+const buildPublicFrontendUrl = (path: string) => {
+  const base = resolveFrontendBaseUrl();
+  if (!base) return undefined;
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+};
 
 const toWorkshopDayKey = (dateValue: Date | string) => {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -247,9 +259,62 @@ export const cancelAppointment = async (req: Request, res: Response) => {
     }
 
     appointment.status = 'CANCELLED';
-    appointment.cancelReason = reason;
+    appointment.cancelReason = String(reason || '').trim() || undefined;
     await appointment.save();
-    res.json({ message: 'Cita cancelada' });
+
+    const requestUrl = buildPublicFrontendUrl('/solicitar-turno');
+    let emailSent = false;
+
+    try {
+      const [client, vehicle, settings] = await Promise.all([
+        Client.findById(appointment.clientId),
+        Vehicle.findById(appointment.vehicleId),
+        Settings.findOne(),
+      ]);
+
+      if (client?.email) {
+        const clientName = `${client.firstName || ''} ${client.lastName || ''}`.trim() || 'Cliente';
+        const vehicleLabel = vehicle
+          ? `${vehicle.make || ''} ${vehicle.model || ''} (${vehicle.plateNormalized || vehicle.plateRaw || '-'})`.trim()
+          : 'Vehículo';
+        const template = appointmentCancelledTemplate({
+          clientName,
+          vehicleLabel,
+          scheduledAt: appointment.startAt,
+          cancelReason: appointment.cancelReason || undefined,
+          followUpText: requestUrl
+            ? 'Podés solicitar un nuevo turno cuando te quede cómodo desde este enlace.'
+            : 'Si querés, respondé este mensaje y coordinamos una nueva fecha.',
+          requestUrl,
+          requestUrlLabel: 'Solicitar nuevo turno',
+          settings: {
+            shopName: settings?.shopName,
+            address: settings?.address ?? undefined,
+            phone: settings?.phone ?? undefined,
+            emailFrom: settings?.emailFrom ?? undefined,
+            logoUrl: settings?.logoUrl ?? undefined,
+          },
+        });
+
+        await sendEmail({
+          to: client.email,
+          subject: template.subject,
+          html: template.html,
+          text: template.text,
+        });
+        emailSent = true;
+      }
+    } catch (error) {
+      console.error('Error enviando email de cancelación de turno:', error);
+    }
+
+    res.json({
+      message: 'Cita cancelada',
+      notification: {
+        emailSent,
+        requestUrl,
+      },
+    });
   } else {
     res.status(404);
     throw new Error('Cita no encontrada');

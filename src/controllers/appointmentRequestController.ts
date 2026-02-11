@@ -305,6 +305,46 @@ const buildWhatsAppUrl = (phone: string, message: string) => {
   return `https://wa.me/${normalized}?text=${encodeURIComponent(message)}`;
 };
 
+const resolveFrontendBaseUrl = () =>
+  String(process.env.FRONTEND_URL || process.env.APP_BASE_URL || "")
+    .trim()
+    .replace(/\/+$/, "");
+
+const buildPublicFrontendUrl = (path: string) => {
+  const base = resolveFrontendBaseUrl();
+  if (!base) return undefined;
+  return `${base}${path.startsWith("/") ? path : `/${path}`}`;
+};
+
+const REJECTION_REQUIRES_APPOINTMENT_REGEX =
+  /(presencial|inspecci[oó]n|acerc|traer|traelo|taller|revisar|diagn[oó]stic|ver el auto)/i;
+
+const buildRejectionFollowUp = (params: {
+  requestType: RequestType;
+  rejectionReason: string;
+}) => {
+  const trimmedReason = String(params.rejectionReason || "").trim();
+  const shouldRedirectToAppointment =
+    params.requestType !== "quick_estimate" ||
+    REJECTION_REQUIRES_APPOINTMENT_REGEX.test(trimmedReason);
+
+  if (shouldRedirectToAppointment) {
+    return {
+      followUpText:
+        "Para avanzar con tu vehículo, podés solicitar un turno desde este enlace.",
+      requestUrl: buildPublicFrontendUrl("/solicitar-turno"),
+      requestUrlLabel: "Solicitar turno",
+    };
+  }
+
+  return {
+    followUpText:
+      "Si querés, podés cargar una nueva solicitud de presupuesto rápido desde este enlace.",
+    requestUrl: buildPublicFrontendUrl("/solicitar-presupuesto-rapido"),
+    requestUrlLabel: "Solicitar presupuesto rápido",
+  };
+};
+
 const formatGoogleCalendarDate = (date: Date) =>
   date.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
 
@@ -381,6 +421,9 @@ const sendRejectionEmail = async (params: {
   clientName: string;
   vehicleLabel: string;
   rejectionReason: string;
+  followUpText?: string;
+  requestUrl?: string;
+  requestUrlLabel?: string;
   settings: {
     shopName?: string;
     address?: string;
@@ -394,6 +437,9 @@ const sendRejectionEmail = async (params: {
     clientName: params.clientName,
     vehicleLabel: params.vehicleLabel,
     rejectionReason: params.rejectionReason,
+    followUpText: params.followUpText,
+    requestUrl: params.requestUrl,
+    requestUrlLabel: params.requestUrlLabel,
     settings: params.settings,
   });
 
@@ -938,13 +984,7 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
         model: vehicle.model || resolvedModel,
         plateNormalized: vehicle.plateNormalized || normalizedPlate,
       });
-      const frontendBaseUrl = (
-        process.env.FRONTEND_URL ||
-        process.env.APP_BASE_URL ||
-        ""
-      )
-        .trim()
-        .replace(/\/+$/, "");
+      const frontendBaseUrl = resolveFrontendBaseUrl();
       const manageRequestsUrl = frontendBaseUrl
         ? `${frontendBaseUrl}/app/appointment-requests`
         : undefined;
@@ -1263,6 +1303,10 @@ export const rejectAppointmentRequest = async (req: Request, res: Response) => {
     logoUrl: settings?.logoUrl ?? undefined,
   };
   const vehicleLabel = formatVehicleLabel(requestDoc.vehicleData || {});
+  const rejectionFollowUp = buildRejectionFollowUp({
+    requestType: requestDoc.requestType as RequestType,
+    rejectionReason: requestDoc.rejectionReason || rejectionReason.trim(),
+  });
 
   let emailSent = false;
   try {
@@ -1271,6 +1315,9 @@ export const rejectAppointmentRequest = async (req: Request, res: Response) => {
       clientName: requestDoc.clientName,
       vehicleLabel,
       rejectionReason: requestDoc.rejectionReason || rejectionReason.trim(),
+      followUpText: rejectionFollowUp.followUpText,
+      requestUrl: rejectionFollowUp.requestUrl,
+      requestUrlLabel: rejectionFollowUp.requestUrlLabel,
       settings: settingsPayload,
     });
   } catch (error) {
@@ -1278,7 +1325,17 @@ export const rejectAppointmentRequest = async (req: Request, res: Response) => {
   }
 
   const shopName = settings?.shopName || "Taller";
-  const whatsappMessage = `Hola ${requestDoc.clientName}, tu solicitud fue rechazada.\nMotivo: ${requestDoc.rejectionReason}\n${shopName}`;
+  const whatsappMessage = [
+    `Hola ${requestDoc.clientName}, tu solicitud fue rechazada.`,
+    `Motivo: ${requestDoc.rejectionReason}`,
+    rejectionFollowUp.followUpText,
+    rejectionFollowUp.requestUrl
+      ? `${rejectionFollowUp.requestUrlLabel}: ${rejectionFollowUp.requestUrl}`
+      : "",
+    shopName,
+  ]
+    .filter(Boolean)
+    .join("\n");
   const whatsAppUrl = buildWhatsAppUrl(requestDoc.phone, whatsappMessage);
 
   res.json({

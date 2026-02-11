@@ -27,10 +27,12 @@ const estimateSchema = new mongoose.Schema({
 });
 
 const invoiceSchema = new mongoose.Schema({
-  vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
+  vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle' },
   clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
   workOrderId: { type: mongoose.Schema.Types.ObjectId, ref: 'WorkOrder' },
+  prepaidMovementId: { type: mongoose.Schema.Types.ObjectId, ref: 'ClientPrepaidMovement' },
   number: { type: String, required: true, unique: true, index: true }, // e.g., "A-0001"
+  invoiceType: { type: String, enum: ['WORK_ORDER', 'PREPAID_DEPOSIT'], default: 'WORK_ORDER', index: true },
   pdfUrl: { type: String },
   items: [{
     description: { type: String },
@@ -40,6 +42,7 @@ const invoiceSchema = new mongoose.Schema({
   }],
   laborCost: { type: Number, default: 0 },
   discount: { type: Number, default: 0 },
+  prepaidApplied: { type: Number, default: 0, min: 0 },
   total: { type: Number, required: true },
   clientComment: { type: String },
   paymentMethod: { type: String, enum: ['CASH', 'TRANSFER', 'CARD', 'OTHER'] },

@@ -5,6 +5,8 @@ import WorkOrder from "../models/WorkOrder";
 
 const DEFAULT_ESTIMATE_VALIDITY_DAYS = 15;
 const MAX_ESTIMATE_VALIDITY_DAYS = 365;
+const MIN_PREPAID_REMINDER_DAY = 1;
+const MAX_PREPAID_REMINDER_DAY = 28;
 
 const normalizeEstimateValidityDays = (
   value: unknown,
@@ -15,6 +17,19 @@ const normalizeEstimateValidityDays = (
   if (
     normalized < 1 ||
     normalized > MAX_ESTIMATE_VALIDITY_DAYS
+  ) {
+    return null;
+  }
+  return normalized;
+};
+
+const normalizePrepaidReminderDay = (value: unknown): number | null => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const normalized = Math.floor(parsed);
+  if (
+    normalized < MIN_PREPAID_REMINDER_DAY ||
+    normalized > MAX_PREPAID_REMINDER_DAY
   ) {
     return null;
   }
@@ -42,15 +57,37 @@ export const getSettings = async (req: Request, res: Response) => {
         bankHolderFirstName: "",
         bankHolderLastName: "",
         estimateValidityDays: DEFAULT_ESTIMATE_VALIDITY_DAYS,
+        prepaidBalanceEnabled: false,
+        prepaidReminderEnabled: false,
+        prepaidReminderDay: 5,
         unavailableRanges: [],
       });
     } else {
       const normalizedDays = normalizeEstimateValidityDays(
         (settings as any).estimateValidityDays,
       );
+      const normalizedReminderDay = normalizePrepaidReminderDay(
+        (settings as any).prepaidReminderDay,
+      );
+      let shouldSave = false;
       if (!normalizedDays) {
         (settings as any).estimateValidityDays =
           DEFAULT_ESTIMATE_VALIDITY_DAYS;
+        shouldSave = true;
+      }
+      if (!normalizedReminderDay) {
+        (settings as any).prepaidReminderDay = 5;
+        shouldSave = true;
+      }
+      if (typeof (settings as any).prepaidBalanceEnabled !== "boolean") {
+        (settings as any).prepaidBalanceEnabled = false;
+        shouldSave = true;
+      }
+      if (typeof (settings as any).prepaidReminderEnabled !== "boolean") {
+        (settings as any).prepaidReminderEnabled = false;
+        shouldSave = true;
+      }
+      if (shouldSave) {
         await settings.save();
       }
     }
@@ -99,6 +136,53 @@ export const updateSettings = async (req: Request, res: Response) => {
         }
         (settings as any).estimateValidityDays = normalizedDays;
       }
+      if (req.body.prepaidBalanceEnabled !== undefined) {
+        (settings as any).prepaidBalanceEnabled = Boolean(
+          req.body.prepaidBalanceEnabled,
+        );
+      }
+      if (req.body.prepaidReminderEnabled !== undefined) {
+        (settings as any).prepaidReminderEnabled = Boolean(
+          req.body.prepaidReminderEnabled,
+        );
+      }
+      if (req.body.prepaidReminderDay !== undefined) {
+        const normalizedReminderDay = normalizePrepaidReminderDay(
+          req.body.prepaidReminderDay,
+        );
+        if (!normalizedReminderDay) {
+          res.status(400);
+          throw new Error(
+            `El día de recordatorio debe ser un número entre ${MIN_PREPAID_REMINDER_DAY} y ${MAX_PREPAID_REMINDER_DAY}`,
+          );
+        }
+        (settings as any).prepaidReminderDay = normalizedReminderDay;
+      }
+      if (req.body.prepaidOfferWhatsAppTemplate !== undefined) {
+        (settings as any).prepaidOfferWhatsAppTemplate = String(
+          req.body.prepaidOfferWhatsAppTemplate || "",
+        ).trim();
+      }
+      if (req.body.prepaidOfferEmailSubject !== undefined) {
+        (settings as any).prepaidOfferEmailSubject = String(
+          req.body.prepaidOfferEmailSubject || "",
+        ).trim();
+      }
+      if (req.body.prepaidOfferEmailBody !== undefined) {
+        (settings as any).prepaidOfferEmailBody = String(
+          req.body.prepaidOfferEmailBody || "",
+        ).trim();
+      }
+      if (req.body.prepaidReminderEmailSubject !== undefined) {
+        (settings as any).prepaidReminderEmailSubject = String(
+          req.body.prepaidReminderEmailSubject || "",
+        ).trim();
+      }
+      if (req.body.prepaidReminderEmailBody !== undefined) {
+        (settings as any).prepaidReminderEmailBody = String(
+          req.body.prepaidReminderEmailBody || "",
+        ).trim();
+      }
       if (req.body.unavailableRanges !== undefined) {
         settings.unavailableRanges = req.body.unavailableRanges;
       }
@@ -117,9 +201,20 @@ export const updateSettings = async (req: Request, res: Response) => {
           `La vigencia de presupuestos debe ser un número entre 1 y ${MAX_ESTIMATE_VALIDITY_DAYS} días`,
         );
       }
+      const normalizedReminderDay =
+        req.body.prepaidReminderDay !== undefined
+          ? normalizePrepaidReminderDay(req.body.prepaidReminderDay)
+          : 5;
+      if (!normalizedReminderDay) {
+        res.status(400);
+        throw new Error(
+          `El día de recordatorio debe ser un número entre ${MIN_PREPAID_REMINDER_DAY} y ${MAX_PREPAID_REMINDER_DAY}`,
+        );
+      }
       const newSettings = await Settings.create({
         ...req.body,
         estimateValidityDays: normalizedDays,
+        prepaidReminderDay: normalizedReminderDay,
       });
       res.status(201).json(newSettings);
     }

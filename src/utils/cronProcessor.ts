@@ -2,6 +2,7 @@ import ReminderJob from '../models/ReminderJob';
 import Appointment from '../models/Appointment';
 import WorkOrder from '../models/WorkOrder';
 import AppointmentRequest from '../models/AppointmentRequest';
+import Client from '../models/Client';
 import Settings from '../models/Settings';
 import { sendEmail } from './mailer';
 
@@ -185,6 +186,24 @@ const escapeHtml = (value: string) =>
 
 const toLocalDateKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+const toLocalMonthKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
+
+const replaceTemplateTokens = (template: string, vars: Record<string, string>) => {
+  return Object.entries(vars).reduce((acc, [key, value]) => {
+    const token = new RegExp(`{{\\s*${key}\\s*}}`, 'gi');
+    return acc.replace(token, value);
+  }, template);
+};
+
+const normalizeReminderDay = (value: unknown) => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 5;
+  const normalized = Math.floor(parsed);
+  if (normalized < 1 || normalized > 28) return 5;
+  return normalized;
+};
 
 export const rescheduleOverdueAppointments = async () => {
   const now = new Date();
@@ -662,6 +681,106 @@ export const sendOwnerDailySummary = async () => {
     appointments: appointments.length,
     pendingRequests: pendingRequests.length,
   };
+};
+
+export const sendMonthlyPrepaidReminders = async () => {
+  const settings = await Settings.findOne();
+  if (!settings?.prepaidBalanceEnabled) {
+    return {
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+      reason: 'PREPAID_DISABLED',
+    };
+  }
+  if (!settings?.prepaidReminderEnabled) {
+    return {
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+      reason: 'PREPAID_REMINDER_DISABLED',
+    };
+  }
+
+  const now = new Date();
+  const reminderDay = normalizeReminderDay(settings.prepaidReminderDay);
+  const todayDay = now.getDate();
+  const monthKey = toLocalMonthKey(now);
+  if (todayDay !== reminderDay) {
+    return {
+      sent: 0,
+      skipped: 0,
+      failed: 0,
+      reason: 'NOT_SCHEDULED_DAY',
+      reminderDay,
+      todayDay,
+      monthKey,
+    };
+  }
+
+  const clients = await Client.find({
+    prepaidEligible: true,
+    email: { $exists: true, $ne: '' },
+    $or: [
+      { prepaidLastReminderMonth: { $exists: false } },
+      { prepaidLastReminderMonth: { $ne: monthKey } },
+    ],
+  }).select('firstName lastName email prepaidBalance prepaidLastReminderMonth');
+
+  const results = {
+    sent: 0,
+    skipped: 0,
+    failed: 0,
+    monthKey,
+    reminderDay,
+  };
+
+  const shopName = settings.shopName || 'Taller Suarez';
+  const baseSubject =
+    String(settings.prepaidReminderEmailSubject || '').trim() ||
+    'Recordatorio amable: saldo a favor disponible';
+  const baseBody =
+    String(settings.prepaidReminderEmailBody || '').trim() ||
+    'Hola {{nombre}}, te recordamos que tenés disponible nuestro beneficio de saldo a favor. Es totalmente opcional.';
+
+  const formatCurrency = (value: number) =>
+    new Intl.NumberFormat('es-AR', {
+      style: 'currency',
+      currency: 'ARS',
+      maximumFractionDigits: 0,
+    }).format(Number(value || 0));
+
+  for (const client of clients) {
+    try {
+      if (!client.email) {
+        results.skipped += 1;
+        continue;
+      }
+      const clientName = `${client.firstName || ''} ${client.lastName || ''}`.trim() || 'Cliente';
+      const vars = {
+        nombre: clientName,
+        saldo: formatCurrency(Number((client as any).prepaidBalance || 0)),
+        taller: shopName,
+      };
+      const subject = replaceTemplateTokens(baseSubject, vars);
+      const text = replaceTemplateTokens(baseBody, vars);
+      const html = `<div style="font-family: Arial, sans-serif; color: #0f172a; line-height:1.5; white-space: pre-line;">${text}</div>`;
+      await sendEmail({
+        to: client.email,
+        subject,
+        text,
+        html,
+        bcc: settings.emailFrom || process.env.EMAIL_FROM || process.env.SMTP_USER,
+      });
+      (client as any).prepaidLastReminderMonth = monthKey;
+      await client.save();
+      results.sent += 1;
+    } catch {
+      results.failed += 1;
+    }
+  }
+
+  return results;
 };
 
 export const processMaintenanceReminders = async () => {
