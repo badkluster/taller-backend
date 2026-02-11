@@ -65,6 +65,34 @@ const WORK_ORDER_STATUS_FILTERS: Record<string, string[]> = {
   CANCELLED: ['CANCELADA', 'CANCELLED'],
 };
 
+const REPAIR_WORK_ORDER_STATUS = new Set(['EN_PROCESO', 'IN_PROGRESS', 'COMPLETADA', 'CLOSED']);
+
+const normalizeWorkOrderCategory = (rawCategory?: unknown) => {
+  const normalized = String(rawCategory || '')
+    .trim()
+    .toUpperCase();
+  if (!normalized) return '';
+  if (normalized === 'REPARACION') return 'REPARACION';
+  if (normalized === 'PRESUPUESTO') return 'PRESUPUESTO';
+  if (normalized === 'GENERAL') return 'GENERAL';
+  return '';
+};
+
+const normalizeWorkOrderStatus = (rawStatus?: unknown) => {
+  const normalized = String(rawStatus || '')
+    .trim()
+    .toUpperCase();
+  if (!normalized) return '';
+  if (normalized === 'OPEN') return 'PRESUPUESTO';
+  if (normalized === 'IN_PROGRESS') return 'EN_PROCESO';
+  if (normalized === 'CLOSED') return 'COMPLETADA';
+  if (normalized === 'CANCELLED') return 'CANCELADA';
+  if (['PRESUPUESTO', 'EN_PROCESO', 'COMPLETADA', 'CANCELADA'].includes(normalized)) {
+    return normalized;
+  }
+  return '';
+};
+
 const buildWorkOrderStatusQuery = (rawStatus: unknown) => {
   if (!rawStatus) return null;
 
@@ -114,6 +142,33 @@ const deleteCloudinaryAsset = async (url?: string) => {
   }
 };
 
+const EMPLOYEE_ALLOWED_WORK_ORDER_STATUSES = new Set(['EN_PROCESO', 'IN_PROGRESS']);
+
+const sanitizeWorkOrderForEmployee = (workOrder: any) => {
+  const plain =
+    typeof workOrder?.toObject === 'function'
+      ? workOrder.toObject()
+      : { ...(workOrder || {}) };
+
+  delete plain.items;
+  delete plain.laborCost;
+  delete plain.discount;
+  delete plain.total;
+  delete plain.paymentMethod;
+  delete plain.clientComment;
+  delete plain.maintenanceDetail;
+  delete plain.maintenanceNotice;
+  delete plain.maintenanceDate;
+  delete plain.estimatePdfUrl;
+  delete plain.estimateNumber;
+  delete plain.invoicePdfUrl;
+  delete plain.invoiceNumber;
+  delete plain.originalEstimatePdfUrl;
+  delete plain.originalEstimateNumber;
+
+  return plain;
+};
+
 // @desc    Get Work Orders
 // @route   GET /api/workorders
 // @access  Private
@@ -131,12 +186,28 @@ export const getWorkOrders = async (req: Request, res: Response) => {
   const page = Number.isFinite(requestedPage)
     ? Math.max(1, Math.floor(requestedPage))
     : 1;
-  const { vehicleId, status, appointmentId, keyword, startDate, endDate } = req.query;
+  const { vehicleId, status, appointmentId, keyword, startDate, endDate, category } = req.query;
+  const isEmployee = req.user?.role === 'employee';
 
   const query: any = {};
+  if (isEmployee) {
+    query.category = 'REPARACION';
+    query.status = { $in: Array.from(EMPLOYEE_ALLOWED_WORK_ORDER_STATUSES) };
+  }
   if (vehicleId) query.vehicleId = vehicleId;
   const statusQuery = buildWorkOrderStatusQuery(status);
-  if (statusQuery) query.status = statusQuery;
+  if (!isEmployee && statusQuery) query.status = statusQuery;
+  if (!isEmployee && category) {
+    const requestedCategories = String(category)
+      .split(',')
+      .map((item) => normalizeWorkOrderCategory(item))
+      .filter(Boolean);
+    if (requestedCategories.length === 1) {
+      query.category = requestedCategories[0];
+    } else if (requestedCategories.length > 1) {
+      query.category = { $in: requestedCategories };
+    }
+  }
   if (appointmentId) query.appointmentId = appointmentId;
   if (startDate || endDate) {
     const start = parseDateBoundary(startDate, 'start');
@@ -175,6 +246,8 @@ export const getWorkOrders = async (req: Request, res: Response) => {
 
     query.$or = [
       { workDetailsText: { $regex: regex, $options: 'i' } },
+      { internalComment: { $regex: regex, $options: 'i' } },
+      { clientComment: { $regex: regex, $options: 'i' } },
       ...(vehicleIds.length ? [{ vehicleId: { $in: vehicleIds } }] : []),
       ...(clientIds.length ? [{ clientId: { $in: clientIds } }] : []),
     ];
@@ -188,7 +261,11 @@ export const getWorkOrders = async (req: Request, res: Response) => {
     .limit(pageSize)
     .skip(pageSize * (page - 1));
 
-  res.json({ workOrders, page, pages: Math.ceil(count / pageSize), totalCount: count });
+  const workOrdersPayload = isEmployee
+    ? workOrders.map((workOrder) => sanitizeWorkOrderForEmployee(workOrder))
+    : workOrders;
+
+  res.json({ workOrders: workOrdersPayload, page, pages: Math.ceil(count / pageSize), totalCount: count });
 };
 
 // @desc    Create Work Order
@@ -202,6 +279,8 @@ export const createWorkOrder = async (req: Request, res: Response) => {
     category,
     status, 
     workDetailsText, 
+    internalComment,
+    clientComment,
     startAt, 
     endAt,
     laborCost,
@@ -212,13 +291,22 @@ export const createWorkOrder = async (req: Request, res: Response) => {
 
   if (!req.user) throw new Error('No autorizado');
 
+  const normalizedCategory = normalizeWorkOrderCategory(category) || 'GENERAL';
+  const normalizedStatus = normalizeWorkOrderStatus(status);
+  const initialStatus = normalizedStatus ||
+    (normalizedCategory === 'REPARACION' ? 'EN_PROCESO' : 'PRESUPUESTO');
+  const shouldMarkWorkStarted = REPAIR_WORK_ORDER_STATUS.has(initialStatus);
+
   const workOrder = await WorkOrder.create({
     vehicleId,
     clientId,
     appointmentId,
-    category: category || 'GENERAL',
-    status: status || 'PRESUPUESTO',
+    category: normalizedCategory,
+    status: initialStatus,
+    ...(shouldMarkWorkStarted ? { workStartedAt: new Date() } : {}),
     workDetailsText,
+    internalComment,
+    clientComment,
     startAt,
     endAt,
     laborCost,
@@ -235,12 +323,24 @@ export const createWorkOrder = async (req: Request, res: Response) => {
 // @route   GET /api/workorders/:id
 // @access  Private
 export const getWorkOrderById = async (req: Request, res: Response) => {
+  const isEmployee = req.user?.role === 'employee';
   const workOrder = await WorkOrder.findById(req.params.id)
     .populate('vehicleId')
     .populate('clientId')
     .populate('appointmentId');
 
   if (workOrder) {
+    if (isEmployee) {
+      const category = String(workOrder.category || '').toUpperCase();
+      const status = String(workOrder.status || '').toUpperCase();
+      if (category !== 'REPARACION' || !EMPLOYEE_ALLOWED_WORK_ORDER_STATUSES.has(status)) {
+        res.status(403);
+        throw new Error('No autorizado para ver esta orden');
+      }
+      res.json(sanitizeWorkOrderForEmployee(workOrder));
+      return;
+    }
+
     res.json(workOrder);
   } else {
     res.status(404);
@@ -255,6 +355,37 @@ export const updateWorkOrder = async (req: Request, res: Response) => {
   const workOrder = await WorkOrder.findById(req.params.id);
 
   if (workOrder) {
+    const isEmployee = req.user?.role === 'employee';
+    if (isEmployee) {
+      const incomingKeys = Object.keys(req.body || {});
+      const allowedKeys = new Set(['workDetailsText', 'internalComment', 'evidence']);
+      const hasForbiddenUpdate = incomingKeys.some((key) => !allowedKeys.has(key));
+      if (hasForbiddenUpdate) {
+        res.status(403);
+        throw new Error('No autorizado para modificar estos campos');
+      }
+
+      const currentStatus = String(workOrder.status || '').toUpperCase();
+      if (!EMPLOYEE_ALLOWED_WORK_ORDER_STATUSES.has(currentStatus)) {
+        res.status(403);
+        throw new Error('Solo se pueden actualizar órdenes de reparación en proceso');
+      }
+
+      if (req.body.workDetailsText !== undefined) {
+        workOrder.workDetailsText = req.body.workDetailsText;
+      }
+      if (req.body.internalComment !== undefined) {
+        workOrder.internalComment = req.body.internalComment;
+      }
+      if (req.body.evidence !== undefined) {
+        workOrder.evidence = req.body.evidence;
+      }
+
+      const updatedEmployeeWO = await workOrder.save();
+      res.json(sanitizeWorkOrderForEmployee(updatedEmployeeWO));
+      return;
+    }
+
     logger.info({
       id: workOrder._id.toString(),
       status: workOrder.status,
@@ -321,12 +452,26 @@ export const updateWorkOrder = async (req: Request, res: Response) => {
     }
 
     const nextStatus = req.body.status || workOrder.status;
+    const repairProgressStatuses = ['EN_PROCESO', 'IN_PROGRESS', 'COMPLETADA', 'CLOSED'];
+    const shouldPromoteCategoryToRepair =
+      !req.body.category &&
+      workOrder.category === 'PRESUPUESTO' &&
+      repairProgressStatuses.includes(String(nextStatus).toUpperCase());
+
     workOrder.status = nextStatus;
-    if (!workOrder.workStartedAt && ['EN_PROCESO', 'COMPLETADA'].includes(nextStatus)) {
+    if (!workOrder.workStartedAt && ['EN_PROCESO', 'IN_PROGRESS', 'COMPLETADA', 'CLOSED'].includes(String(nextStatus).toUpperCase())) {
       workOrder.workStartedAt = new Date();
     }
-    workOrder.category = req.body.category || workOrder.category;
-    workOrder.workDetailsText = req.body.workDetailsText || workOrder.workDetailsText;
+    workOrder.category = req.body.category || (shouldPromoteCategoryToRepair ? 'REPARACION' : workOrder.category);
+    if (req.body.workDetailsText !== undefined) {
+      workOrder.workDetailsText = req.body.workDetailsText;
+    }
+    if (req.body.internalComment !== undefined) {
+      workOrder.internalComment = req.body.internalComment;
+    }
+    if (req.body.clientComment !== undefined) {
+      workOrder.clientComment = req.body.clientComment;
+    }
     workOrder.maintenanceDetail = req.body.maintenanceDetail !== undefined ? req.body.maintenanceDetail : workOrder.maintenanceDetail;
     workOrder.maintenanceNotice = req.body.maintenanceNotice !== undefined ? req.body.maintenanceNotice : workOrder.maintenanceNotice;
     workOrder.maintenanceDate = req.body.maintenanceDate !== undefined ? req.body.maintenanceDate : workOrder.maintenanceDate;
@@ -411,17 +556,24 @@ export const updateWorkOrder = async (req: Request, res: Response) => {
       }
     }
 
-    if (workOrder.appointmentId && req.body.status) {
+    if (updatedWO.appointmentId && req.body.status) {
       const appointmentStatusMap: Record<string, string> = {
         EN_PROCESO: 'IN_PROGRESS',
+        IN_PROGRESS: 'IN_PROGRESS',
         COMPLETADA: 'COMPLETED',
+        CLOSED: 'COMPLETED',
         CANCELADA: 'CANCELLED',
+        CANCELLED: 'CANCELLED',
       };
       const mappedStatus = appointmentStatusMap[nextStatus as string];
       if (mappedStatus) {
-        await Appointment.findByIdAndUpdate(workOrder.appointmentId, {
-          status: mappedStatus,
-        });
+        const appointmentUpdates: Record<string, string> = { status: mappedStatus };
+        if (updatedWO.category === 'REPARACION') {
+          appointmentUpdates.serviceType = 'REPARACION';
+        } else if (updatedWO.category === 'PRESUPUESTO') {
+          appointmentUpdates.serviceType = 'PRESUPUESTO';
+        }
+        await Appointment.findByIdAndUpdate(updatedWO.appointmentId, appointmentUpdates);
       }
     }
     res.json(updatedWO);
@@ -439,6 +591,15 @@ export const addEvidence = async (req: Request, res: Response) => {
   const workOrder = await WorkOrder.findById(req.params.id);
 
   if (workOrder) {
+    if (req.user?.role === 'employee') {
+      const category = String(workOrder.category || '').toUpperCase();
+      const status = String(workOrder.status || '').toUpperCase();
+      if (category !== 'REPARACION' || !EMPLOYEE_ALLOWED_WORK_ORDER_STATUSES.has(status)) {
+        res.status(403);
+        throw new Error('No autorizado para agregar evidencia en esta orden');
+      }
+    }
+
     workOrder.evidence.push({
       type,
       text,
@@ -450,6 +611,10 @@ export const addEvidence = async (req: Request, res: Response) => {
     });
 
     await workOrder.save();
+    if (req.user?.role === 'employee') {
+      res.json(sanitizeWorkOrderForEmployee(workOrder));
+      return;
+    }
     res.json(workOrder);
   } else {
     res.status(404);

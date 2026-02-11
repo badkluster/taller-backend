@@ -94,12 +94,26 @@ export const estimateEmailTemplate = (data: {
   pdfUrl?: string;
   clientName: string;
   vehicleLabel: string;
+  validityDays?: number;
+  validUntil?: Date;
   settings: ShopSettings;
 }) => {
+  const resolvedValidityDays = Number.isFinite(Number(data.validityDays))
+    ? Math.max(1, Math.floor(Number(data.validityDays)))
+    : 15;
+  const validUntilDate = data.validUntil
+    ? new Date(data.validUntil)
+    : null;
+  const validUntilText =
+    validUntilDate && !Number.isNaN(validUntilDate.getTime())
+      ? `Vigente hasta el ${validUntilDate.toLocaleDateString("es-AR")}.`
+      : `Vigente por ${resolvedValidityDays} días desde su emisión.`;
+
   const body = `
     <p>Hola ${data.clientName},</p>
     <p>Te enviamos el presupuesto para tu vehículo <strong>${data.vehicleLabel}</strong>.</p>
     <p style="font-size:18px; font-weight:700; color:#0f172a;">Total estimado: ${formatCurrency(data.total)}</p>
+    <p style="color:#0f172a;">${validUntilText}</p>
     ${data.pdfUrl ? `<p><a href="${data.pdfUrl}" style="color:#2563eb; font-weight:700;">Descargar PDF</a></p>` : ""}
     <p>Quedamos atentos a tu confirmación.</p>
   `;
@@ -107,7 +121,7 @@ export const estimateEmailTemplate = (data: {
   return {
     subject: `Presupuesto ${data.estimateNumber} - ${data.vehicleLabel}`,
     html: baseLayout("Presupuesto", body, data.settings),
-    text: `Hola ${data.clientName}\nPresupuesto ${data.estimateNumber}\nVehículo: ${data.vehicleLabel}\nTotal estimado: ${formatCurrency(data.total)}\n${data.pdfUrl ? `PDF: ${data.pdfUrl}` : ""}`,
+    text: `Hola ${data.clientName}\nPresupuesto ${data.estimateNumber}\nVehículo: ${data.vehicleLabel}\nTotal estimado: ${formatCurrency(data.total)}\n${validUntilText}\n${data.pdfUrl ? `PDF: ${data.pdfUrl}` : ""}`,
   };
 };
 

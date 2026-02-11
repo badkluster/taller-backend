@@ -11,6 +11,8 @@ const workOrderSchema = new mongoose.Schema({
     default: 'PRESUPUESTO'
   },
   workDetailsText: { type: String },
+  internalComment: { type: String },
+  clientComment: { type: String },
   maintenanceDetail: { type: String },
   maintenanceNotice: { type: Boolean, default: false },
   maintenanceDate: { type: Date },

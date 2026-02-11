@@ -1,9 +1,11 @@
 import { Request, Response } from 'express';
 import Vehicle from '../models/Vehicle';
-import Client from '../models/Client';
 import Appointment from '../models/Appointment';
 import WorkOrder from '../models/WorkOrder';
 import { normalizePlate } from '../utils/normalizePlate';
+
+const isMongoDuplicateKeyError = (error: any) =>
+  !!error && error.name === 'MongoServerError' && error.code === 11000;
 
 // @desc    Get all vehicles with pagination and search
 // @route   GET /api/vehicles
@@ -85,26 +87,39 @@ export const createVehicle = async (req: Request, res: Response) => {
   const ownerId = clientId || currentOwner;
 
   const plateNormalized = normalizePlate(plateRaw);
+  if (!plateNormalized) {
+    res.status(400);
+    throw new Error('La patente es obligatoria');
+  }
+
   const vehicleExists = await Vehicle.findOne({ plateNormalized });
 
   if (vehicleExists) {
-    res.status(400);
+    res.status(409);
     throw new Error('Ya existe un vehículo con esta patente');
   }
 
-  const vehicle = await Vehicle.create({
-    plateRaw,
-    plateNormalized,
-    make,
-    model,
-    year,
-    color,
-    km,
-    currentOwner: ownerId,
-    ownerHistory: [{ clientId: ownerId, fromAt: new Date(), note: 'Initial Owner' }]
-  });
+  try {
+    const vehicle = await Vehicle.create({
+      plateRaw,
+      plateNormalized,
+      make,
+      model,
+      year,
+      color,
+      km,
+      currentOwner: ownerId,
+      ownerHistory: [{ clientId: ownerId, fromAt: new Date(), note: 'Initial Owner' }],
+    });
 
-  res.status(201).json(vehicle);
+    res.status(201).json(vehicle);
+  } catch (error: any) {
+    if (isMongoDuplicateKeyError(error)) {
+      res.status(409);
+      throw new Error('Ya existe un vehículo con esta patente');
+    }
+    throw error;
+  }
 };
 
 // @desc    Update a vehicle
@@ -122,12 +137,36 @@ export const updateVehicle = async (req: Request, res: Response) => {
     if (color !== undefined) vehicle.color = color;
     if (km !== undefined) vehicle.km = km;
     if (plateRaw !== undefined && plateRaw !== '') {
-      vehicle.plateRaw = plateRaw;
-      vehicle.plateNormalized = normalizePlate(plateRaw as string);
-    } // Creating a new plate is risky if conflict, but mongo index will catch it
+      const nextPlateNormalized = normalizePlate(plateRaw as string);
+      if (!nextPlateNormalized) {
+        res.status(400);
+        throw new Error('La patente es obligatoria');
+      }
 
-    const updatedVehicle = await vehicle.save();
-    res.json(updatedVehicle);
+      const duplicatedVehicle = await Vehicle.findOne({
+        plateNormalized: nextPlateNormalized,
+        _id: { $ne: vehicle._id },
+      });
+
+      if (duplicatedVehicle) {
+        res.status(409);
+        throw new Error('Ya existe un vehículo con esta patente');
+      }
+
+      vehicle.plateRaw = plateRaw;
+      vehicle.plateNormalized = nextPlateNormalized;
+    }
+
+    try {
+      const updatedVehicle = await vehicle.save();
+      res.json(updatedVehicle);
+    } catch (error: any) {
+      if (isMongoDuplicateKeyError(error)) {
+        res.status(409);
+        throw new Error('Ya existe un vehículo con esta patente');
+      }
+      throw error;
+    }
   } else {
     res.status(404);
     throw new Error('Vehículo no encontrado');

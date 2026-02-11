@@ -1,5 +1,5 @@
-import mongoose from 'mongoose';
-import { normalizePlate } from '../utils/normalizePlate';
+import mongoose from "mongoose";
+import { normalizePlate } from "../utils/normalizePlate";
 
 const vehicleDataSchema = new mongoose.Schema(
   {
@@ -21,30 +21,45 @@ const appointmentRequestSchema = new mongoose.Schema(
     email: { type: String, trim: true },
     clientId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Client',
+      ref: "Client",
     },
     vehicleId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Vehicle',
+      ref: "Vehicle",
     },
     vehicleData: { type: vehicleDataSchema, required: true },
     requestType: {
       type: String,
-      enum: ['diagnosis', 'repair'],
+      enum: ["diagnosis", "repair", "quick_estimate"],
       required: true,
     },
-    description: { type: String, trim: true, default: '' },
+    quickEstimateScope: {
+      type: String,
+      enum: ["LABOR_ONLY", "WITH_MATERIALS"],
+    },
+    quickEstimateDetails: {
+      engine: { type: String, trim: true },
+      valves: { type: String, trim: true },
+      engineCode: { type: String, trim: true },
+      partsPreference: { type: String, trim: true },
+      specialRequest: { type: String, trim: true },
+    },
+    description: { type: String, trim: true, default: "" },
     suggestedDates: [{ type: Date, required: true }],
     status: {
       type: String,
-      enum: ['PENDING', 'CONFIRMED', 'REJECTED'],
-      default: 'PENDING',
+      enum: ["PENDING", "CONFIRMED", "REJECTED"],
+      default: "PENDING",
       index: true,
     },
     rejectionReason: { type: String, trim: true },
     confirmedAppointmentId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Appointment',
+      ref: "Appointment",
+    },
+    confirmedWorkOrderId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "WorkOrder",
     },
     confirmedAt: { type: Date },
     rejectedAt: { type: Date },
@@ -54,11 +69,19 @@ const appointmentRequestSchema = new mongoose.Schema(
   },
 );
 
-appointmentRequestSchema.pre('validate', function normalizeVehiclePlate(this: any) {
-  if (this.vehicleData?.plateRaw) {
-    this.vehicleData.plateNormalized = normalizePlate(this.vehicleData.plateRaw);
-  }
-});
+appointmentRequestSchema.pre(
+  "validate",
+  function normalizeVehiclePlate(this: any) {
+    if (this.vehicleData?.plateRaw) {
+      this.vehicleData.plateNormalized = normalizePlate(
+        this.vehicleData.plateRaw,
+      );
+    }
+  },
+);
 
-const AppointmentRequest = mongoose.model('AppointmentRequest', appointmentRequestSchema);
+const AppointmentRequest = mongoose.model(
+  "AppointmentRequest",
+  appointmentRequestSchema,
+);
 export default AppointmentRequest;

@@ -16,7 +16,10 @@ const estimateSchema = new mongoose.Schema({
   }],
   laborCost: { type: Number, default: 0 },
   discount: { type: Number, default: 0 },
+  validityDays: { type: Number, default: 15, min: 1, max: 365 },
+  validUntil: { type: Date },
   total: { type: Number, required: true },
+  clientComment: { type: String },
   sentAt: { type: Date },
   channelsUsed: [{ type: String, enum: ['EMAIL', 'WHATSAPP'] }]
 }, {
@@ -38,6 +41,7 @@ const invoiceSchema = new mongoose.Schema({
   laborCost: { type: Number, default: 0 },
   discount: { type: Number, default: 0 },
   total: { type: Number, required: true },
+  clientComment: { type: String },
   paymentMethod: { type: String, enum: ['CASH', 'TRANSFER', 'CARD', 'OTHER'] },
   issuedAt: { type: Date, default: Date.now },
   sentAt: { type: Date }

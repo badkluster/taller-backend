@@ -12,6 +12,21 @@ import { sendEmail } from '../utils/mailer';
 import { estimateEmailTemplate, invoiceEmailTemplate } from '../utils/emailTemplates';
 import cloudinary from '../config/cloudinary';
 
+const DEFAULT_ESTIMATE_VALIDITY_DAYS = 15;
+const MAX_ESTIMATE_VALIDITY_DAYS = 365;
+
+const resolveEstimateValidityDays = (settingsDoc?: any) => {
+  const rawValue = Number(settingsDoc?.estimateValidityDays);
+  if (!Number.isFinite(rawValue)) {
+    return DEFAULT_ESTIMATE_VALIDITY_DAYS;
+  }
+  const normalized = Math.floor(rawValue);
+  if (normalized < 1 || normalized > MAX_ESTIMATE_VALIDITY_DAYS) {
+    return DEFAULT_ESTIMATE_VALIDITY_DAYS;
+  }
+  return normalized;
+};
+
 const buildPdfBuffer = async (doc: any) => {
   const chunks: Buffer[] = [];
   doc.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -80,7 +95,13 @@ const getMaxUsedSequence = async (model: Model<any>, prefix: string) => {
     {
       $project: {
         numericValue: {
-          $toInt: { $substrCP: ['$number', prefix.length, -1] },
+          $toInt: {
+            $substrCP: [
+              '$number',
+              prefix.length,
+              { $subtract: [{ $strLenCP: '$number' }, prefix.length] },
+            ],
+          },
         },
       },
     },
@@ -149,6 +170,14 @@ export const createEstimate = async (req: Request, res: Response) => {
     throw new Error('vehicleId y clientId son requeridos');
   }
 
+  const settings = await Settings.findOne();
+  const estimateValidityDays = resolveEstimateValidityDays(settings);
+  const estimateIssuedAt = new Date();
+  const estimateValidUntil = new Date(estimateIssuedAt);
+  estimateValidUntil.setDate(
+    estimateValidUntil.getDate() + estimateValidityDays,
+  );
+
   const number = await getNextDocumentNumber(Estimate as any, 'estimate_number', 'P-');
 
   const baseItems = Array.isArray(items) && items.length ? items : (workOrderDoc?.items || []);
@@ -164,6 +193,9 @@ export const createEstimate = async (req: Request, res: Response) => {
   const resolvedDiscount = discount !== undefined
     ? Number(discount || 0)
     : Number(workOrderDoc?.discount || 0);
+  const resolvedClientComment = req.body.clientComment !== undefined
+    ? String(req.body.clientComment || '').trim()
+    : String(workOrderDoc?.clientComment || '').trim();
   const itemsTotal = estimateItems.reduce((acc: number, item: any) => acc + Number(item.total || 0), 0);
   const total = itemsTotal + resolvedLaborCost - resolvedDiscount;
 
@@ -183,11 +215,13 @@ export const createEstimate = async (req: Request, res: Response) => {
     items: estimateItems,
     laborCost: resolvedLaborCost,
     discount: resolvedDiscount,
+    validityDays: estimateValidityDays,
+    validUntil: estimateValidUntil,
+    clientComment: resolvedClientComment,
   });
 
   try {
-    const [settings, vehicle, client, workOrder] = await Promise.all([
-      Settings.findOne(),
+    const [vehicle, client, workOrder] = await Promise.all([
       resolvedVehicleId ? Vehicle.findById(resolvedVehicleId) : null,
       resolvedClientId ? Client.findById(resolvedClientId) : null,
       workOrderId ? WorkOrder.findById(workOrderId).populate('vehicleId').populate('clientId') : null,
@@ -207,13 +241,16 @@ export const createEstimate = async (req: Request, res: Response) => {
 
     const pdfDoc = generateEstimatePdf({
       number,
-      date: new Date(),
+      date: estimateIssuedAt,
       clientName,
       vehicleLabel,
       items: estimateItems,
       laborCost: resolvedLaborCost,
       discount: resolvedDiscount,
       total,
+      validityDays: estimateValidityDays,
+      validUntil: estimateValidUntil,
+      clientComment: resolvedClientComment || undefined,
       shopName: settings?.shopName,
       address: settings?.address ?? undefined,
       phone: settings?.phone ?? undefined,
@@ -306,6 +343,9 @@ export const createInvoice = async (req: Request, res: Response) => {
   const itemsTotal = invoiceItems.reduce((acc: number, item: any) => acc + Number(item.total || 0), 0);
   const laborCost = req.body.laborCost !== undefined ? Number(req.body.laborCost) : Number(workOrder.laborCost || 0);
   const discount = req.body.discount !== undefined ? Number(req.body.discount) : Number(workOrder.discount || 0);
+  const clientComment = req.body.clientComment !== undefined
+    ? String(req.body.clientComment || '').trim()
+    : String(workOrder.clientComment || '').trim();
   const total = req.body.total !== undefined
     ? Number(req.body.total)
     : (itemsTotal + laborCost - discount);
@@ -320,6 +360,7 @@ export const createInvoice = async (req: Request, res: Response) => {
     items: invoiceItems,
     laborCost,
     discount,
+    clientComment,
     total,
     paymentMethod: workOrder.paymentMethod,
     issuedAt: new Date()
@@ -351,6 +392,7 @@ export const createInvoice = async (req: Request, res: Response) => {
       laborCost,
       discount,
       total,
+      clientComment: clientComment || undefined,
       shopName: settings?.shopName,
       address: settings?.address ?? undefined,
       phone: settings?.phone ?? undefined,
@@ -437,17 +479,36 @@ export const getInvoices = async (req: Request, res: Response) => {
     .limit(pageSize)
     .skip(pageSize * (page - 1));
 
-  const totalAgg = await Invoice.aggregate([
+  const totalsAgg = await Invoice.aggregate([
     { $match: query },
-    { $group: { _id: null, total: { $sum: '$total' } } },
+    {
+      $group: {
+        _id: null,
+        totalBilled: { $sum: { $ifNull: ['$total', 0] } },
+        totalRealIncome: { $sum: { $ifNull: ['$laborCost', 0] } },
+      },
+    },
   ]);
 
+  const totalBilled = Number(totalsAgg?.[0]?.totalBilled || 0);
+  const totalRealIncome = Number(totalsAgg?.[0]?.totalRealIncome || 0);
+  const normalizedInvoices = invoices.map((invoice: any) => {
+    const raw = invoice?.toObject ? invoice.toObject() : invoice;
+    return {
+      ...raw,
+      totalBilled: Number(raw?.total || 0),
+      realIncome: Number(raw?.laborCost || 0),
+    };
+  });
+
   res.json({
-    invoices,
+    invoices: normalizedInvoices,
     page,
     pages: Math.ceil(count / pageSize),
     totalCount: count,
-    totalAmount: totalAgg[0]?.total || 0,
+    totalAmount: totalBilled,
+    totalBilled,
+    totalRealIncome,
   });
 };
 
@@ -524,6 +585,50 @@ export const sendEstimateEmail = async (req: Request, res: Response) => {
   const laborCost = estimate.laborCost ?? workOrder?.laborCost ?? 0;
   const discount = estimate.discount ?? workOrder?.discount ?? 0;
   const total = estimate.total ?? (items.reduce((acc: number, item: any) => acc + Number(item.total || 0), 0) + laborCost - discount);
+  const clientCommentSource = workOrder?.clientComment !== undefined
+    ? workOrder.clientComment
+    : estimate.clientComment;
+  const clientComment = String(clientCommentSource ?? '').trim();
+  const configuredValidityDays = resolveEstimateValidityDays(settings);
+  const persistedValidityDays = Number((estimate as any).validityDays);
+  const estimateValidityDays = Number.isFinite(persistedValidityDays) &&
+    persistedValidityDays >= 1 &&
+    persistedValidityDays <= MAX_ESTIMATE_VALIDITY_DAYS
+    ? Math.floor(persistedValidityDays)
+    : configuredValidityDays;
+  const persistedValidUntil = (estimate as any).validUntil
+    ? new Date((estimate as any).validUntil)
+    : null;
+  const baseEstimateDate = estimate.createdAt
+    ? new Date(estimate.createdAt)
+    : new Date();
+  const resolvedValidUntil = persistedValidUntil &&
+    !Number.isNaN(persistedValidUntil.getTime())
+    ? persistedValidUntil
+    : (() => {
+        const next = new Date(baseEstimateDate);
+        next.setDate(next.getDate() + estimateValidityDays);
+        return next;
+      })();
+
+  let shouldPersistEstimate = false;
+
+  if ((estimate.clientComment || '') !== clientComment) {
+    estimate.clientComment = clientComment;
+    shouldPersistEstimate = true;
+  }
+  if (Number((estimate as any).validityDays || 0) !== estimateValidityDays) {
+    (estimate as any).validityDays = estimateValidityDays;
+    shouldPersistEstimate = true;
+  }
+  if (!(estimate as any).validUntil || Number(new Date((estimate as any).validUntil).getTime()) !== Number(resolvedValidUntil.getTime())) {
+    (estimate as any).validUntil = resolvedValidUntil;
+    shouldPersistEstimate = true;
+  }
+  if (shouldPersistEstimate) {
+    await estimate.save();
+  }
+
   const pdfDoc = generateEstimatePdf({
     number: estimate.number,
     date: new Date(),
@@ -533,6 +638,9 @@ export const sendEstimateEmail = async (req: Request, res: Response) => {
     laborCost,
     discount,
     total,
+    validityDays: estimateValidityDays,
+    validUntil: resolvedValidUntil,
+    clientComment: clientComment || undefined,
     shopName: settings?.shopName,
     address: settings?.address ?? undefined,
     phone: settings?.phone ?? undefined,
@@ -556,6 +664,8 @@ export const sendEstimateEmail = async (req: Request, res: Response) => {
     pdfUrl: estimate.pdfUrl ?? undefined,
     clientName: `${client.firstName} ${client.lastName}`,
     vehicleLabel: vehicle ? `${vehicle.make} ${vehicle.model} (${vehicle.plateNormalized})` : 'Vehículo',
+    validityDays: estimateValidityDays,
+    validUntil: resolvedValidUntil,
     settings: {
       shopName: settings?.shopName,
       address: settings?.address ?? undefined,
@@ -620,6 +730,16 @@ export const sendInvoiceEmail = async (req: Request, res: Response) => {
   const laborCost = invoice.laborCost ?? workOrder?.laborCost ?? 0;
   const discount = invoice.discount ?? workOrder?.discount ?? 0;
   const total = invoice.total ?? workOrder?.total ?? 0;
+  const clientCommentSource = workOrder?.clientComment !== undefined
+    ? workOrder.clientComment
+    : invoice.clientComment;
+  const clientComment = String(clientCommentSource ?? '').trim();
+
+  if ((invoice.clientComment || '') !== clientComment) {
+    invoice.clientComment = clientComment;
+    await invoice.save();
+  }
+
   const invoiceDoc = generateInvoicePdf({
     number: invoice.number,
     date: new Date(),
@@ -629,6 +749,7 @@ export const sendInvoiceEmail = async (req: Request, res: Response) => {
     laborCost,
     discount,
     total,
+    clientComment: clientComment || undefined,
     shopName: settings?.shopName,
     address: settings?.address ?? undefined,
     phone: settings?.phone ?? undefined,

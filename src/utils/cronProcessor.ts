@@ -226,7 +226,7 @@ export const rescheduleOverdueAppointments = async () => {
     .map((appt) => appt.startAt)
     .sort((a, b) => a.getTime() - b.getTime())[0];
 
-  const results = { rescheduled: 0, noShow: 0, skipped: 0 };
+  const results = { rescheduled: 0, noShow: 0, completedBudget: 0, skipped: 0 };
 
   for (const appointment of overdueAppointments) {
     if (appointment.status === 'CONFIRMED') {
@@ -251,6 +251,20 @@ export const rescheduleOverdueAppointments = async () => {
       appointment.cancelReason = appointment.cancelReason || 'No asistió';
       await appointment.save();
       results.noShow += 1;
+      continue;
+    }
+
+    const normalizedServiceType = String(appointment.serviceType || '').toUpperCase();
+    const normalizedWorkOrderStatus = String(workOrder.status || '').toUpperCase();
+    const isBudgetStageWorkOrder = ['PRESUPUESTO', 'OPEN'].includes(normalizedWorkOrderStatus);
+    const isRepairAppointment = normalizedServiceType === 'REPARACION';
+
+    // Budget appointments should close at end of day unless they became repair appointments.
+    if (isBudgetStageWorkOrder && !isRepairAppointment) {
+      appointment.status = 'COMPLETED';
+      appointment.cancelReason = undefined;
+      await appointment.save();
+      results.completedBudget += 1;
       continue;
     }
 

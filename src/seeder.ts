@@ -43,6 +43,12 @@ const importData = async () => {
       emailFrom: 'contacto@tallersuarez.com',
       workingHours: 'Lunes a Viernes 08:30 a 18:30',
       invoiceSeriesPrefix: 'A-',
+      bankAlias: '',
+      bankName: '',
+      bankCbu: '',
+      bankHolderFirstName: '',
+      bankHolderLastName: '',
+      estimateValidityDays: 15,
     });
 
     const adminUser = await User.create({

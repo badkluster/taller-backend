@@ -10,6 +10,25 @@ import { Estimate } from '../models/Finance';
 
 const isCompletedAppointment = (status?: string) =>
   status === 'COMPLETED' || status === 'CLOSED';
+const isRepairServiceType = (serviceType?: string) =>
+  String(serviceType || '').trim().toUpperCase() === 'REPARACION';
+
+const WORKSHOP_TIME_ZONE =
+  process.env.WORKSHOP_TIME_ZONE || 'America/Argentina/Buenos_Aires';
+
+const toWorkshopDayKey = (dateValue: Date | string) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: WORKSHOP_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date(dateValue));
+  const values: Record<string, string> = {};
+  parts.forEach((part) => {
+    if (part.type !== 'literal') values[part.type] = part.value;
+  });
+  return `${values.year || '1970'}-${values.month || '01'}-${values.day || '01'}`;
+};
 
 // @desc    Get appointments (filtered by date range)
 // @route   GET /api/appointments
@@ -18,6 +37,7 @@ export const getAppointments = async (req: Request, res: Response) => {
   const { from, to, assignedTo, vehicleId } = req.query;
 
   const query: any = {};
+  const isEmployee = req.user?.role === 'employee';
   
   if (from && to) {
     query.startAt = { $gte: new Date(from as string), $lte: new Date(to as string) };
@@ -28,6 +48,9 @@ export const getAppointments = async (req: Request, res: Response) => {
   }
   if (vehicleId) {
     query.vehicleId = vehicleId;
+  }
+  if (isEmployee) {
+    query.status = { $in: ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] };
   }
 
   const appointments = await Appointment.find(query)
@@ -270,6 +293,15 @@ export const convertToWorkOrder = async (req: Request, res: Response) => {
     throw new Error('Un turno completado no permite crear una nueva orden de trabajo');
   }
 
+  if (appointment.startAt) {
+    const appointmentDayKey = toWorkshopDayKey(appointment.startAt);
+    const todayDayKey = toWorkshopDayKey(new Date());
+    if (appointmentDayKey > todayDayKey) {
+      res.status(400);
+      throw new Error('No se puede crear una orden de trabajo antes de la fecha del turno');
+    }
+  }
+
   // Check if WO already exists for this appointment
   const existingWO = await WorkOrder.findOne({ appointmentId: appointment._id });
   if (existingWO) {
@@ -279,12 +311,16 @@ export const convertToWorkOrder = async (req: Request, res: Response) => {
 
   if (!req.user) throw new Error('No autorizado');
 
+  const isRepairAppointment = isRepairServiceType(appointment.serviceType);
+  const initialStatus = isRepairAppointment ? 'EN_PROCESO' : 'PRESUPUESTO';
+
   const workOrder = await WorkOrder.create({
     appointmentId: appointment._id,
     vehicleId: appointment.vehicleId,
     clientId: appointment.clientId,
-    category: appointment.serviceType === 'REPARACION' ? 'REPARACION' : 'PRESUPUESTO',
-    status: 'PRESUPUESTO',
+    category: isRepairAppointment ? 'REPARACION' : 'PRESUPUESTO',
+    status: initialStatus,
+    ...(isRepairAppointment ? { workStartedAt: new Date() } : {}),
     workDetailsText: appointment.notes, // Copy notes initially
     createdBy: req.user._id
   });
@@ -293,16 +329,47 @@ export const convertToWorkOrder = async (req: Request, res: Response) => {
   appointment.status = 'IN_PROGRESS';
   await appointment.save();
 
-  // Link latest estimate from this appointment (if any) to the new work order
-  const latestEstimate = await Estimate.findOne({ appointmentId: appointment._id }).sort({ createdAt: -1 });
-  if (latestEstimate) {
-    if (!latestEstimate.workOrderId) {
-      latestEstimate.workOrderId = workOrder._id;
-      await latestEstimate.save();
+  // Link estimate from same appointment first.
+  // For direct repair appointments, fallback to the latest estimate of the same vehicle/client.
+  let referenceEstimate =
+    await Estimate.findOne({ appointmentId: appointment._id }).sort({
+      createdAt: -1,
+    });
+
+  if (!referenceEstimate && isRepairAppointment) {
+    referenceEstimate = await Estimate.findOne({
+      vehicleId: appointment.vehicleId,
+      clientId: appointment.clientId,
+    }).sort({ createdAt: -1 });
+  }
+
+  if (referenceEstimate) {
+    if (!referenceEstimate.workOrderId) {
+      referenceEstimate.workOrderId = workOrder._id;
+      await referenceEstimate.save();
     }
-    if (!workOrder.estimatePdfUrl && latestEstimate.pdfUrl) {
-      workOrder.estimatePdfUrl = latestEstimate.pdfUrl;
-      workOrder.estimateNumber = latestEstimate.number;
+
+    let shouldSaveWorkOrder = false;
+    if (referenceEstimate.pdfUrl && !workOrder.estimatePdfUrl) {
+      workOrder.estimatePdfUrl = referenceEstimate.pdfUrl;
+      shouldSaveWorkOrder = true;
+    }
+    if (referenceEstimate.number && !workOrder.estimateNumber) {
+      workOrder.estimateNumber = referenceEstimate.number;
+      shouldSaveWorkOrder = true;
+    }
+    if (isRepairAppointment) {
+      if (referenceEstimate.pdfUrl && !workOrder.originalEstimatePdfUrl) {
+        workOrder.originalEstimatePdfUrl = referenceEstimate.pdfUrl;
+        shouldSaveWorkOrder = true;
+      }
+      if (referenceEstimate.number && !workOrder.originalEstimateNumber) {
+        workOrder.originalEstimateNumber = referenceEstimate.number;
+        shouldSaveWorkOrder = true;
+      }
+    }
+
+    if (shouldSaveWorkOrder) {
       await workOrder.save();
     }
   }

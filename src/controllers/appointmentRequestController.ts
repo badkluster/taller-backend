@@ -4,15 +4,22 @@ import AppointmentRequest from "../models/AppointmentRequest";
 import Client from "../models/Client";
 import Settings from "../models/Settings";
 import Vehicle from "../models/Vehicle";
+import WorkOrder from "../models/WorkOrder";
 import {
   appointmentRequestConfirmedTemplate,
   appointmentRequestRejectedTemplate,
   ownerNewAppointmentRequestTemplate,
 } from "../utils/emailTemplates";
+import {
+  buildClientIdentityFilter,
+  normalizeClientEmail,
+  normalizeClientPhone,
+} from "../utils/clientIdentity";
 import { sendEmail } from "../utils/mailer";
 import { normalizePlate } from "../utils/normalizePlate";
 
-type RequestType = "diagnosis" | "repair";
+type RequestType = "diagnosis" | "repair" | "quick_estimate";
+type QuickEstimateScope = "LABOR_ONLY" | "WITH_MATERIALS";
 
 type OwnerDataPayload = {
   firstName: string;
@@ -30,6 +37,14 @@ type VehicleDataPayload = {
   color?: string;
 };
 
+type QuickEstimateDetailsPayload = {
+  engine?: string;
+  valves?: string;
+  engineCode?: string;
+  partsPreference?: string;
+  specialRequest?: string;
+};
+
 type CreateAppointmentRequestBody = {
   ownerData?: Partial<OwnerDataPayload>;
   ownerChanged?: boolean;
@@ -39,8 +54,10 @@ type CreateAppointmentRequestBody = {
   email?: string;
   vehicleData: VehicleDataPayload;
   requestType: RequestType;
+  quickEstimateScope?: QuickEstimateScope;
+  quickEstimateDetails?: QuickEstimateDetailsPayload;
   description?: string;
-  suggestedDates: string[];
+  suggestedDates?: string[];
 };
 
 type CancelPublicRequestBody = {
@@ -50,15 +67,19 @@ type CancelPublicRequestBody = {
 };
 
 type ConfirmBody = {
-  finalDate: string;
-  entryTime: string;
+  finalDate?: string;
+  entryTime?: string;
 };
 
 type RejectBody = {
   rejectionReason: string;
 };
 
-const REQUEST_TYPES: RequestType[] = ["diagnosis", "repair"];
+const REQUEST_TYPES: RequestType[] = ["diagnosis", "repair", "quick_estimate"];
+const QUICK_ESTIMATE_SCOPES: QuickEstimateScope[] = [
+  "LABOR_ONLY",
+  "WITH_MATERIALS",
+];
 const REQUEST_STATUSES = ["PENDING", "CONFIRMED", "REJECTED"] as const;
 const APPOINTMENT_REQUESTS_DEFAULT_PAGE_SIZE = 12;
 const APPOINTMENT_REQUESTS_MIN_PAGE_SIZE = 10;
@@ -68,7 +89,7 @@ const DEFAULT_CALENDAR_EVENT_DURATION_MINUTES = (() => {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
 })();
 
-const normalizePhone = (phone?: string) => (phone || "").replace(/[^0-9]/g, "");
+const normalizePhone = (phone?: string) => normalizeClientPhone(phone);
 const trimString = (value?: string) => {
   const trimmed = value?.trim();
   return trimmed ? trimmed : undefined;
@@ -99,8 +120,41 @@ const parseDateAndTime = (finalDate: string, entryTime: string) =>
 
 const mapRequestTypeToServiceType = (requestType: RequestType) =>
   requestType === "repair" ? "REPARACION" : "PRESUPUESTO";
-const mapRequestTypeToLabel = (requestType: RequestType) =>
-  requestType === "repair" ? "Reparación" : "Diagnóstico / Presupuesto";
+const mapRequestTypeToLabel = (requestType: RequestType) => {
+  if (requestType === "repair") return "Reparación";
+  if (requestType === "quick_estimate") return "Presupuesto Rápido";
+  return "Diagnóstico / Presupuesto";
+};
+const mapQuickEstimateScopeToLabel = (scope?: QuickEstimateScope) => {
+  if (scope === "WITH_MATERIALS") return "Con materiales";
+  return "Solo mano de obra";
+};
+const normalizeQuickEstimateDetails = (details?: QuickEstimateDetailsPayload) => {
+  const normalized = {
+    engine: trimString(details?.engine),
+    valves: trimString(details?.valves),
+    engineCode: trimString(details?.engineCode),
+    partsPreference: trimString(details?.partsPreference),
+    specialRequest: trimString(details?.specialRequest),
+  };
+  const hasAny = Object.values(normalized).some(Boolean);
+  return hasAny ? normalized : undefined;
+};
+const buildQuickEstimateDetailsLines = (details?: QuickEstimateDetailsPayload) => {
+  if (!details) return [] as string[];
+  const normalized = normalizeQuickEstimateDetails(details);
+  if (!normalized) return [] as string[];
+
+  return [
+    normalized.engine ? `Motor: ${normalized.engine}` : "",
+    normalized.valves ? `Válvulas: ${normalized.valves}` : "",
+    normalized.engineCode ? `Código motor: ${normalized.engineCode}` : "",
+    normalized.partsPreference
+      ? `Preferencia materiales: ${normalized.partsPreference}`
+      : "",
+    normalized.specialRequest ? `Pedido especial: ${normalized.specialRequest}` : "",
+  ].filter(Boolean);
+};
 
 const splitClientName = (fullName: string) => {
   const chunks = fullName.trim().split(/\s+/).filter(Boolean);
@@ -128,10 +182,9 @@ const normalizeOwnerPayload = (
   const phone = normalizePhone(
     body.ownerData?.phone || fallbackOwner?.phone || body.phone,
   );
-  const email =
-    trimString(body.ownerData?.email) ||
-    trimString(fallbackOwner?.email) ||
-    trimString(body.email);
+  const email = normalizeClientEmail(
+    body.ownerData?.email || fallbackOwner?.email || body.email,
+  );
 
   const legacyClientName = trimString(body.clientName);
   if ((!firstName || !lastName) && legacyClientName) {
@@ -199,18 +252,12 @@ const parseAndValidateSuggestedDates = (rawSuggestedDates: unknown[]) => {
   return uniqueSuggestedDates;
 };
 
-const findOrCreateClient = async (
-  ownerPayload: OwnerDataPayload,
-  forceCreate: boolean,
-) => {
-  if (forceCreate) {
-    return Client.create(ownerPayload);
-  }
-
-  let client = await Client.findOne({ phone: ownerPayload.phone });
-  if (!client && ownerPayload.email) {
-    client = await Client.findOne({ email: ownerPayload.email });
-  }
+const findOrCreateClient = async (ownerPayload: OwnerDataPayload) => {
+  const duplicateFilter = buildClientIdentityFilter({
+    phone: ownerPayload.phone,
+    email: ownerPayload.email,
+  });
+  let client = duplicateFilter ? await Client.findOne(duplicateFilter) : null;
 
   if (!client) {
     return Client.create(ownerPayload);
@@ -373,14 +420,13 @@ const resolveClientAndVehicle = async (requestDoc: any) => {
 
   const { firstName, lastName } = splitClientName(requestDoc.clientName);
   const normalizedPhone = normalizePhone(requestDoc.phone);
-  const requestEmail = requestDoc.email || undefined;
+  const requestEmail = normalizeClientEmail(requestDoc.email || undefined);
 
-  let client = await Client.findOne({
+  const duplicateFilter = buildClientIdentityFilter({
     phone: normalizedPhone || requestDoc.phone,
+    email: requestEmail,
   });
-  if (!client && requestEmail) {
-    client = await Client.findOne({ email: requestEmail });
-  }
+  let client = duplicateFilter ? await Client.findOne(duplicateFilter) : null;
   if (!client) {
     client = await Client.create({
       firstName,
@@ -407,22 +453,33 @@ const resolveClientAndVehicle = async (requestDoc: any) => {
       : undefined;
 
   if (!vehicle) {
-    vehicle = await Vehicle.create({
-      plateRaw,
-      make: requestDoc.vehicleData?.make,
-      model: requestDoc.vehicleData?.model,
-      year: parsedYear,
-      km: parsedKm,
-      color: requestDoc.vehicleData?.color,
-      currentOwner: client._id,
-      ownerHistory: [
-        {
-          clientId: client._id,
-          fromAt: new Date(),
-          note: "Owner created from appointment request",
-        },
-      ],
-    });
+    try {
+      vehicle = await Vehicle.create({
+        plateRaw,
+        make: requestDoc.vehicleData?.make,
+        model: requestDoc.vehicleData?.model,
+        year: parsedYear,
+        km: parsedKm,
+        color: requestDoc.vehicleData?.color,
+        currentOwner: client._id,
+        ownerHistory: [
+          {
+            clientId: client._id,
+            fromAt: new Date(),
+            note: "Owner created from appointment request",
+          },
+        ],
+      });
+    } catch (error: any) {
+      if (error?.name === "MongoServerError" && error?.code === 11000) {
+        vehicle = await Vehicle.findOne({ plateNormalized });
+      } else {
+        throw error;
+      }
+    }
+    if (!vehicle) {
+      throw new Error("No se pudo resolver el vehículo por patente");
+    }
   } else if (String(vehicle.currentOwner) !== String(client._id)) {
     if (vehicle.ownerHistory && vehicle.ownerHistory.length > 0) {
       const previous = vehicle.ownerHistory[vehicle.ownerHistory.length - 1];
@@ -531,6 +588,8 @@ export const getPublicPendingAppointmentRequest = async (
       status: pendingRequest.status,
       requestType: pendingRequest.requestType,
       requestTypeLabel: mapRequestTypeToLabel(pendingRequest.requestType as RequestType),
+      quickEstimateScope: pendingRequest.quickEstimateScope,
+      quickEstimateDetails: pendingRequest.quickEstimateDetails,
       description: pendingRequest.description || "",
       suggestedDates: pendingRequest.suggestedDates || [],
       createdAt: pendingRequest.createdAt,
@@ -599,11 +658,26 @@ export const cancelPublicPendingAppointmentRequest = async (
 // @access  Public
 export const createAppointmentRequest = async (req: Request, res: Response) => {
   const body = req.body as CreateAppointmentRequestBody;
-  const { vehicleData, requestType, description, suggestedDates } = body;
+  const { vehicleData, requestType, description, suggestedDates, quickEstimateDetails } =
+    body;
 
   if (!REQUEST_TYPES.includes(requestType)) {
     res.status(400);
     throw new Error("Tipo de solicitud inválido");
+  }
+  const isQuickEstimate = requestType === "quick_estimate";
+  const resolvedQuickEstimateScope = isQuickEstimate
+    ? (String(body.quickEstimateScope || "").toUpperCase() as QuickEstimateScope)
+    : undefined;
+  if (
+    isQuickEstimate &&
+    (!resolvedQuickEstimateScope ||
+      !QUICK_ESTIMATE_SCOPES.includes(resolvedQuickEstimateScope))
+  ) {
+    res.status(400);
+    throw new Error(
+      "Debe indicar si el presupuesto rápido requiere materiales o solo mano de obra",
+    );
   }
   if (!vehicleData?.plateRaw?.trim()) {
     res.status(400);
@@ -664,44 +738,77 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
     res.status(400);
     throw new Error("El kilometraje del vehículo es inválido");
   }
+  const existingVehicleColor =
+    typeof existingVehicle?.color === "string" ? existingVehicle.color : undefined;
+  const resolvedColor = trimString(vehicleData.color) || trimString(existingVehicleColor);
+  const cleanDescription = description?.trim() || "";
+  const normalizedQuickEstimateDetails = isQuickEstimate
+    ? normalizeQuickEstimateDetails(quickEstimateDetails)
+    : undefined;
+  if (isQuickEstimate) {
+    if (parsedKm === undefined) {
+      res.status(400);
+      throw new Error("Para presupuesto rápido el kilometraje del vehículo es obligatorio");
+    }
+    if (cleanDescription.length < 20) {
+      res.status(400);
+      throw new Error(
+        "Para presupuesto rápido describí claramente el trabajo a presupuestar (mínimo 20 caracteres)",
+      );
+    }
+  }
 
-  let parsedSuggestedDates: Date[];
-  try {
-    parsedSuggestedDates = parseAndValidateSuggestedDates(
-      suggestedDates as unknown[],
-    );
-  } catch (error: any) {
-    res.status(400);
-    throw new Error(error?.message || "Las fechas sugeridas son inválidas");
+  let parsedSuggestedDates: Date[] = [];
+  if (!isQuickEstimate) {
+    try {
+      parsedSuggestedDates = parseAndValidateSuggestedDates(
+        (suggestedDates || []) as unknown[],
+      );
+    } catch (error: any) {
+      res.status(400);
+      throw new Error(error?.message || "Las fechas sugeridas son inválidas");
+    }
   }
 
   const ownerChanged = Boolean(body.ownerChanged && existingVehicle);
-  const client = await findOrCreateClient(ownerPayload, ownerChanged);
+  const client = await findOrCreateClient(ownerPayload);
 
   let vehicle = existingVehicle;
   if (!vehicle) {
-    vehicle = await Vehicle.create({
-      plateRaw: vehicleData.plateRaw.trim(),
-      plateNormalized: normalizedPlate,
-      make: resolvedMake,
-      model: resolvedModel,
-      year: parsedYear,
-      km: parsedKm,
-      color: trimString(vehicleData.color),
-      currentOwner: client._id,
-      ownerHistory: [
-        {
-          clientId: client._id,
-          fromAt: new Date(),
-          note: "Owner created from public appointment request",
-        },
-      ],
-    });
+    try {
+      vehicle = await Vehicle.create({
+        plateRaw: vehicleData.plateRaw.trim(),
+        plateNormalized: normalizedPlate,
+        make: resolvedMake,
+        model: resolvedModel,
+        year: parsedYear,
+        km: parsedKm,
+        color: resolvedColor,
+        currentOwner: client._id,
+        ownerHistory: [
+          {
+            clientId: client._id,
+            fromAt: new Date(),
+            note: "Owner created from public appointment request",
+          },
+        ],
+      });
+    } catch (error: any) {
+      if (error?.name === "MongoServerError" && error?.code === 11000) {
+        vehicle = await Vehicle.findOne({ plateNormalized: normalizedPlate });
+      } else {
+        throw error;
+      }
+    }
+    if (!vehicle) {
+      throw new Error("No se pudo resolver el vehículo por patente");
+    }
   } else {
     const currentOwnerId = toIdString(vehicle.currentOwner);
     const nextOwnerId = toIdString(client._id);
     const shouldUpdateOwner =
       ownerChanged || (nextOwnerId && currentOwnerId !== nextOwnerId);
+    let shouldSaveVehicle = false;
 
     if (shouldUpdateOwner) {
       if (vehicle.ownerHistory && vehicle.ownerHistory.length > 0) {
@@ -716,6 +823,27 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
         fromAt: new Date(),
         note: "Owner updated from public appointment request",
       });
+      shouldSaveVehicle = true;
+    }
+
+    if (resolvedMake && vehicle.make !== resolvedMake) {
+      vehicle.make = resolvedMake;
+      shouldSaveVehicle = true;
+    }
+    if (parsedYear && vehicle.year !== parsedYear) {
+      vehicle.year = parsedYear;
+      shouldSaveVehicle = true;
+    }
+    if (parsedKm !== undefined && vehicle.km !== parsedKm) {
+      vehicle.km = parsedKm;
+      shouldSaveVehicle = true;
+    }
+    if (resolvedColor && vehicle.color !== resolvedColor) {
+      vehicle.color = resolvedColor;
+      shouldSaveVehicle = true;
+    }
+
+    if (shouldSaveVehicle) {
       await vehicle.save();
     }
   }
@@ -731,14 +859,16 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
     vehicleData: {
       plateRaw: vehicle.plateRaw || vehicleData.plateRaw.trim(),
       plateNormalized: vehicle.plateNormalized || normalizedPlate,
-      make: vehicle.make || resolvedMake,
-      model: vehicle.model || resolvedModel,
-      year: vehicle.year || parsedYear,
-      km: vehicle.km ?? parsedKm,
-      color: vehicle.color || trimString(vehicleData.color),
+      make: resolvedMake,
+      model: resolvedModel,
+      year: parsedYear,
+      km: parsedKm,
+      color: resolvedColor,
     },
     requestType,
-    description: description?.trim() || "",
+    quickEstimateScope: resolvedQuickEstimateScope,
+    quickEstimateDetails: normalizedQuickEstimateDetails,
+    description: cleanDescription,
     suggestedDates: parsedSuggestedDates,
     status: "PENDING",
   } as const;
@@ -762,10 +892,13 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
       const pendingDateLabel = new Date(
         existingPendingRequest.createdAt || new Date(),
       ).toLocaleDateString("es-AR");
+      const pendingMessage = isQuickEstimate
+        ? `Ya tenés un presupuesto rápido pendiente del ${pendingDateLabel}. ¿Querés actualizarlo?`
+        : `Ya tenés una solicitud pendiente del ${pendingDateLabel}. ¿Querés actualizar fechas?`;
 
       res.status(409).json({
         code: "PENDING_REQUEST_EXISTS",
-        message: `Ya tenés una solicitud pendiente del ${pendingDateLabel}. ¿Querés actualizar fechas?`,
+        message: pendingMessage,
         existingRequest: {
           id: existingPendingRequest._id,
           createdAt: existingPendingRequest.createdAt,
@@ -784,6 +917,9 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
     existingPendingRequest.vehicleId = requestPayload.vehicleId;
     existingPendingRequest.vehicleData = requestPayload.vehicleData;
     existingPendingRequest.requestType = requestPayload.requestType;
+    existingPendingRequest.quickEstimateScope = requestPayload.quickEstimateScope;
+    existingPendingRequest.quickEstimateDetails =
+      requestPayload.quickEstimateDetails;
     existingPendingRequest.description = requestPayload.description;
     existingPendingRequest.suggestedDates = requestPayload.suggestedDates;
     requestDoc = await existingPendingRequest.save();
@@ -812,14 +948,27 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
       const manageRequestsUrl = frontendBaseUrl
         ? `${frontendBaseUrl}/app/appointment-requests`
         : undefined;
+      const quickEstimateDetailsLines = buildQuickEstimateDetailsLines(
+        normalizedQuickEstimateDetails,
+      );
+      const ownerRequestDescription = [
+        cleanDescription || "",
+        ...quickEstimateDetailsLines,
+      ]
+        .filter(Boolean)
+        .join("\n");
 
       const ownerTemplate = ownerNewAppointmentRequestTemplate({
         clientName: snapshotClientName,
         phone: ownerPayload.phone,
         email: ownerPayload.email,
         vehicleLabel: ownerVehicleLabel,
-        requestTypeLabel: mapRequestTypeToLabel(requestType),
-        description: description?.trim() || undefined,
+        requestTypeLabel: isQuickEstimate
+          ? `${mapRequestTypeToLabel(requestType)} (${mapQuickEstimateScopeToLabel(
+              resolvedQuickEstimateScope,
+            )})`
+          : mapRequestTypeToLabel(requestType),
+        description: ownerRequestDescription || undefined,
         suggestedDates: parsedSuggestedDates,
         manageRequestsUrl,
         notificationType: wasUpdatedExisting ? "UPDATED" : "NEW",
@@ -867,12 +1016,23 @@ export const getAppointmentRequests = async (req: Request, res: Response) => {
     : 1;
 
   const status = req.query.status as string | undefined;
+  const requestTypeFilter = toQueryString(req.query.requestType).toLowerCase();
   const suggestedFromRaw = toQueryString(req.query.suggestedFrom);
   const suggestedToRaw = toQueryString(req.query.suggestedTo);
   const query: Record<string, any> = {};
 
   if (status && (REQUEST_STATUSES as readonly string[]).includes(status)) {
     query.status = status;
+  }
+  if (requestTypeFilter) {
+    if (requestTypeFilter === "appointment") {
+      query.requestType = { $in: ["diagnosis", "repair"] };
+    } else if ((REQUEST_TYPES as string[]).includes(requestTypeFilter)) {
+      query.requestType = requestTypeFilter;
+    } else {
+      res.status(400);
+      throw new Error("Filtro de tipo de solicitud inválido");
+    }
   }
 
   const suggestedRange: Record<string, Date> = {};
@@ -929,40 +1089,75 @@ export const confirmAppointmentRequest = async (
     throw new Error("Solo se pueden confirmar solicitudes pendientes");
   }
 
+  const isQuickEstimate = requestDoc.requestType === "quick_estimate";
   const { finalDate, entryTime } = req.body as ConfirmBody;
-  if (!finalDate || !entryTime) {
-    res.status(400);
-    throw new Error("Debe indicar fecha y hora de ingreso");
-  }
+  const quickEstimateDetailsLines = buildQuickEstimateDetailsLines(
+    requestDoc.quickEstimateDetails as QuickEstimateDetailsPayload | undefined,
+  );
+  const quickEstimateWorkDetails = [
+    requestDoc.description?.trim() || "Solicitud de presupuesto rápido sin turno",
+    ...quickEstimateDetailsLines,
+  ]
+    .filter(Boolean)
+    .join("\n");
 
-  const confirmedStartAt = parseDateAndTime(finalDate, entryTime);
-  if (Number.isNaN(confirmedStartAt.getTime())) {
-    res.status(400);
-    throw new Error("Fecha u hora inválidas");
-  }
-  if (confirmedStartAt < new Date()) {
-    res.status(400);
-    throw new Error("No se puede confirmar un turno en una fecha pasada");
+  let confirmedStartAt = new Date();
+  if (!isQuickEstimate) {
+    if (!finalDate || !entryTime) {
+      res.status(400);
+      throw new Error("Debe indicar fecha y hora de ingreso");
+    }
+
+    confirmedStartAt = parseDateAndTime(finalDate, entryTime);
+    if (Number.isNaN(confirmedStartAt.getTime())) {
+      res.status(400);
+      throw new Error("Fecha u hora inválidas");
+    }
+    if (confirmedStartAt < new Date()) {
+      res.status(400);
+      throw new Error("No se puede confirmar un turno en una fecha pasada");
+    }
   }
 
   const { client, vehicle } = await resolveClientAndVehicle(requestDoc);
 
-  const appointment = await Appointment.create({
-    vehicleId: vehicle._id,
-    clientId: client._id,
-    startAt: confirmedStartAt,
-    endAt: confirmedStartAt,
-    status: "CONFIRMED",
-    serviceType: mapRequestTypeToServiceType(requestDoc.requestType),
-    notes: requestDoc.description || "",
-    createdBy: req.user._id,
-  });
+  let appointment: any = null;
+  let workOrder: any = null;
+
+  if (isQuickEstimate) {
+    workOrder = await WorkOrder.create({
+      vehicleId: vehicle._id,
+      clientId: client._id,
+      status: "PRESUPUESTO",
+      category: "PRESUPUESTO",
+      workDetailsText: quickEstimateWorkDetails,
+      items: [],
+      laborCost: 0,
+      discount: 0,
+      total: 0,
+      startAt: confirmedStartAt,
+      endAt: confirmedStartAt,
+      createdBy: req.user._id,
+    });
+  } else {
+    appointment = await Appointment.create({
+      vehicleId: vehicle._id,
+      clientId: client._id,
+      startAt: confirmedStartAt,
+      endAt: confirmedStartAt,
+      status: "CONFIRMED",
+      serviceType: mapRequestTypeToServiceType(requestDoc.requestType as RequestType),
+      notes: requestDoc.description || "",
+      createdBy: req.user._id,
+    });
+  }
 
   requestDoc.status = "CONFIRMED";
   if (!requestDoc.email && client.email) {
     requestDoc.email = client.email;
   }
-  requestDoc.confirmedAppointmentId = appointment._id;
+  requestDoc.confirmedAppointmentId = appointment?._id;
+  requestDoc.confirmedWorkOrderId = workOrder?._id;
   requestDoc.confirmedAt = confirmedStartAt;
   requestDoc.rejectionReason = undefined;
   requestDoc.rejectedAt = undefined;
@@ -989,12 +1184,14 @@ export const confirmAppointmentRequest = async (
   ]
     .filter(Boolean)
     .join("\n");
-  const googleCalendarUrl = buildGoogleCalendarUrl({
-    title: `Turno confirmado - ${shopName}`,
-    startAt: confirmedStartAt,
-    details: calendarDetails,
-    location: settings?.address ?? undefined,
-  });
+  const googleCalendarUrl = isQuickEstimate
+    ? undefined
+    : buildGoogleCalendarUrl({
+        title: `Turno confirmado - ${shopName}`,
+        startAt: confirmedStartAt,
+        details: calendarDetails,
+        location: settings?.address ?? undefined,
+      });
 
   let emailSent = false;
   try {
@@ -1011,15 +1208,16 @@ export const confirmAppointmentRequest = async (
     console.error("Error enviando email de confirmación de solicitud:", error);
   }
 
-  const shopAddress = settings?.address
-    ? `\nDirección: ${settings.address}`
-    : "";
-  const whatsappMessage = `Hola ${requestDoc.clientName}, tu solicitud fue confirmada.\nFecha: ${confirmedStartAt.toLocaleDateString()}\nHora: ${confirmedStartAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${shopAddress}\n${shopName}`;
+  const shopAddress = settings?.address ? `\nDirección: ${settings.address}` : "";
+  const whatsappMessage = isQuickEstimate
+    ? `Hola ${requestDoc.clientName}, tu solicitud de presupuesto rápido fue aceptada.\nGeneramos una orden de presupuesto para tu vehículo ${vehicleLabel}.\n${shopName}${shopAddress}`
+    : `Hola ${requestDoc.clientName}, tu solicitud fue confirmada.\nFecha: ${confirmedStartAt.toLocaleDateString()}\nHora: ${confirmedStartAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${shopAddress}\n${shopName}`;
   const whatsAppUrl = buildWhatsAppUrl(requestDoc.phone, whatsappMessage);
 
   res.json({
     request: requestDoc,
     appointment,
+    workOrder,
     notification: {
       emailSent,
       whatsAppUrl,
@@ -1052,6 +1250,7 @@ export const rejectAppointmentRequest = async (req: Request, res: Response) => {
   requestDoc.rejectionReason = rejectionReason.trim();
   requestDoc.rejectedAt = new Date();
   requestDoc.confirmedAppointmentId = undefined;
+  requestDoc.confirmedWorkOrderId = undefined;
   requestDoc.confirmedAt = undefined;
   await requestDoc.save();
 

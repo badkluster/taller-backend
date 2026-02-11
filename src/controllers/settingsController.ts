@@ -3,6 +3,24 @@ import Settings from "../models/Settings";
 import { processMaintenanceReminders } from "../utils/cronProcessor";
 import WorkOrder from "../models/WorkOrder";
 
+const DEFAULT_ESTIMATE_VALIDITY_DAYS = 15;
+const MAX_ESTIMATE_VALIDITY_DAYS = 365;
+
+const normalizeEstimateValidityDays = (
+  value: unknown,
+): number | null => {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  const normalized = Math.floor(parsed);
+  if (
+    normalized < 1 ||
+    normalized > MAX_ESTIMATE_VALIDITY_DAYS
+  ) {
+    return null;
+  }
+  return normalized;
+};
+
 // @desc    Get settings
 // @route   GET /api/settings
 // @access  Private
@@ -18,8 +36,23 @@ export const getSettings = async (req: Request, res: Response) => {
         phone: "",
         emailFrom: "",
         workingHours: "Lunes a Viernes 09:00 - 20:00",
+        bankAlias: "",
+        bankName: "",
+        bankCbu: "",
+        bankHolderFirstName: "",
+        bankHolderLastName: "",
+        estimateValidityDays: DEFAULT_ESTIMATE_VALIDITY_DAYS,
         unavailableRanges: [],
       });
+    } else {
+      const normalizedDays = normalizeEstimateValidityDays(
+        (settings as any).estimateValidityDays,
+      );
+      if (!normalizedDays) {
+        (settings as any).estimateValidityDays =
+          DEFAULT_ESTIMATE_VALIDITY_DAYS;
+        await settings.save();
+      }
     }
 
     res.json(settings);
@@ -36,14 +69,36 @@ export const updateSettings = async (req: Request, res: Response) => {
     const settings = await Settings.findOne();
 
     if (settings) {
-      settings.shopName = req.body.shopName || settings.shopName;
-      settings.address = req.body.address || settings.address;
-      settings.phone = req.body.phone || settings.phone;
-      settings.emailFrom = req.body.emailFrom || settings.emailFrom;
-      settings.workingHours = req.body.workingHours || settings.workingHours;
-      settings.invoiceSeriesPrefix =
-        req.body.invoiceSeriesPrefix || settings.invoiceSeriesPrefix;
-      settings.logoUrl = req.body.logoUrl || settings.logoUrl;
+      if (req.body.shopName !== undefined) settings.shopName = req.body.shopName;
+      if (req.body.address !== undefined) settings.address = req.body.address;
+      if (req.body.phone !== undefined) settings.phone = req.body.phone;
+      if (req.body.emailFrom !== undefined) settings.emailFrom = req.body.emailFrom;
+      if (req.body.workingHours !== undefined) settings.workingHours = req.body.workingHours;
+      if (req.body.invoiceSeriesPrefix !== undefined) {
+        settings.invoiceSeriesPrefix = req.body.invoiceSeriesPrefix;
+      }
+      if (req.body.logoUrl !== undefined) settings.logoUrl = req.body.logoUrl;
+      if (req.body.bankAlias !== undefined) settings.bankAlias = req.body.bankAlias;
+      if (req.body.bankName !== undefined) settings.bankName = req.body.bankName;
+      if (req.body.bankCbu !== undefined) settings.bankCbu = req.body.bankCbu;
+      if (req.body.bankHolderFirstName !== undefined) {
+        settings.bankHolderFirstName = req.body.bankHolderFirstName;
+      }
+      if (req.body.bankHolderLastName !== undefined) {
+        settings.bankHolderLastName = req.body.bankHolderLastName;
+      }
+      if (req.body.estimateValidityDays !== undefined) {
+        const normalizedDays = normalizeEstimateValidityDays(
+          req.body.estimateValidityDays,
+        );
+        if (!normalizedDays) {
+          res.status(400);
+          throw new Error(
+            `La vigencia de presupuestos debe ser un número entre 1 y ${MAX_ESTIMATE_VALIDITY_DAYS} días`,
+          );
+        }
+        (settings as any).estimateValidityDays = normalizedDays;
+      }
       if (req.body.unavailableRanges !== undefined) {
         settings.unavailableRanges = req.body.unavailableRanges;
       }
@@ -52,7 +107,20 @@ export const updateSettings = async (req: Request, res: Response) => {
       res.json(updatedSettings);
     } else {
       // Create new settings if somehow it doesn't exist
-      const newSettings = await Settings.create(req.body);
+      const normalizedDays =
+        req.body.estimateValidityDays !== undefined
+          ? normalizeEstimateValidityDays(req.body.estimateValidityDays)
+          : DEFAULT_ESTIMATE_VALIDITY_DAYS;
+      if (!normalizedDays) {
+        res.status(400);
+        throw new Error(
+          `La vigencia de presupuestos debe ser un número entre 1 y ${MAX_ESTIMATE_VALIDITY_DAYS} días`,
+        );
+      }
+      const newSettings = await Settings.create({
+        ...req.body,
+        estimateValidityDays: normalizedDays,
+      });
       res.status(201).json(newSettings);
     }
   } catch (error: any) {

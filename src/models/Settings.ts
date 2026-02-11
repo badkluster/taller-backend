@@ -7,6 +7,12 @@ const settingsSchema = new mongoose.Schema(
     phone: { type: String },
     emailFrom: { type: String },
     workingHours: { type: String }, // JSON string or structured object if preferred
+    bankAlias: { type: String },
+    bankName: { type: String },
+    bankCbu: { type: String },
+    bankHolderFirstName: { type: String },
+    bankHolderLastName: { type: String },
+    estimateValidityDays: { type: Number, default: 15, min: 1, max: 365 },
     holidays: [{ type: Date }],
     reminderRules: {
       h24: { type: Boolean, default: true },

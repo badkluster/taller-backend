@@ -10,8 +10,9 @@ import { EmailCampaign } from '../models/Campaign';
 // @route   GET /api/dashboard/summary
 // @access  Private/Admin
 export const getDashboardSummary = async (req: Request, res: Response) => {
-  const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-  const endOfMonth = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0);
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+  const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
 
   const [
     totalAppointments,
@@ -21,7 +22,7 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     totalClients,
     totalVehicles,
     sentCampaigns,
-    invoices,
+    monthlyFinance,
   ] = await Promise.all([
     Appointment.countDocuments({
       startAt: { $gte: startOfMonth, $lte: endOfMonth }
@@ -41,13 +42,20 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     Client.countDocuments({}),
     Vehicle.countDocuments({}),
     EmailCampaign.countDocuments({ status: 'SENT' }),
-    Invoice.find({
-      issuedAt: { $gte: startOfMonth, $lte: endOfMonth }
-    }),
+    Invoice.aggregate([
+      { $match: { issuedAt: { $gte: startOfMonth, $lte: endOfMonth } } },
+      {
+        $group: {
+          _id: null,
+          totalBilled: { $sum: { $ifNull: ['$total', 0] } },
+          realIncome: { $sum: { $ifNull: ['$laborCost', 0] } },
+        },
+      },
+    ]),
   ]);
 
-  // Calculate monthly revenue from Invoices
-  const revenue = invoices.reduce((acc, inv) => acc + inv.total, 0);
+  const totalBilled = Number(monthlyFinance?.[0]?.totalBilled || 0);
+  const realIncome = Number(monthlyFinance?.[0]?.realIncome || 0);
 
   // Recent recent activity
   const recentWorkOrders = await WorkOrder.find().sort({ createdAt: -1 }).limit(5);
@@ -60,7 +68,9 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
     totalClients,
     totalVehicles,
     sentCampaigns,
-    revenue,
+    totalBilled,
+    realIncome,
+    revenue: totalBilled,
     recentWorkOrders
   });
 };
@@ -69,21 +79,59 @@ export const getDashboardSummary = async (req: Request, res: Response) => {
 // @route   GET /api/dashboard/timeseries
 // @access  Private/Admin
 export const getDashboardTimeSeries = async (req: Request, res: Response) => {
-  // Aggregate revenue by month for last 6 months
-  const sixMonthsAgo = new Date();
-  sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+  const monthNames = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
+  const now = new Date();
+  const monthsWindow = Array.from({ length: 6 }).map((_, index) => {
+    const date = new Date(now.getFullYear(), now.getMonth() - (5 - index), 1, 0, 0, 0, 0);
+    return {
+      year: date.getFullYear(),
+      month: date.getMonth() + 1,
+      label: monthNames[date.getMonth()],
+      key: `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`,
+      startAt: date,
+    };
+  });
 
-  const revenueByMonth = await Invoice.aggregate([
-    { $match: { issuedAt: { $gte: sixMonthsAgo } } },
+  const firstMonthStart = monthsWindow[0].startAt;
+  const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1, 0, 0, 0, 0);
+
+  const financeByMonth = await Invoice.aggregate([
+    { $match: { issuedAt: { $gte: firstMonthStart, $lt: nextMonthStart } } },
     {
       $group: {
-        _id: { $month: "$issuedAt" },
-        total: { $sum: "$total" },
-        year: { $first: { $year: "$issuedAt" } } // Keep year to sort correctly if needed
-      }
+        _id: {
+          year: { $year: '$issuedAt' },
+          month: { $month: '$issuedAt' },
+        },
+        totalBilled: { $sum: { $ifNull: ['$total', 0] } },
+        realIncome: { $sum: { $ifNull: ['$laborCost', 0] } },
+      },
     },
-    { $sort: { "_id": 1 } }
   ]);
 
-  res.json(revenueByMonth);
+  const financeMap = new Map<string, { totalBilled: number; realIncome: number }>();
+  financeByMonth.forEach((row: any) => {
+    const year = Number(row?._id?.year);
+    const month = Number(row?._id?.month);
+    if (!year || !month) return;
+    const key = `${year}-${String(month).padStart(2, '0')}`;
+    financeMap.set(key, {
+      totalBilled: Number(row.totalBilled || 0),
+      realIncome: Number(row.realIncome || 0),
+    });
+  });
+
+  const response = monthsWindow.map((month) => {
+    const values = financeMap.get(month.key) || { totalBilled: 0, realIncome: 0 };
+    return {
+      _id: month.label,
+      year: month.year,
+      month: month.month,
+      totalBilled: values.totalBilled,
+      realIncome: values.realIncome,
+      total: values.totalBilled,
+    };
+  });
+
+  res.json(response);
 };

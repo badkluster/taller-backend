@@ -115,6 +115,9 @@ export const generateEstimatePdf = (data: {
   laborCost: number;
   discount: number;
   total: number;
+  validityDays?: number;
+  validUntil?: Date;
+  clientComment?: string;
   shopName?: string;
   address?: string;
   phone?: string;
@@ -131,6 +134,24 @@ export const generateEstimatePdf = (data: {
 
   addItemsTable(doc, data.items);
 
+  if (data.clientComment?.trim()) {
+    const comment = data.clientComment.trim();
+    const left = doc.page.margins.left;
+    const right = doc.page.width - doc.page.margins.right;
+    const width = right - left;
+    const boxY = doc.y;
+    const boxHeight = 70;
+
+    doc.roundedRect(left, boxY, width, boxHeight, 10).fill('#f8fafc');
+    doc.fillColor('#334155').fontSize(9).text('COMENTARIO PARA EL CLIENTE', left + 12, boxY + 10);
+    doc.fillColor('#0f172a').fontSize(10).text(comment, left + 12, boxY + 26, {
+      width: width - 24,
+      height: boxHeight - 32,
+      ellipsis: true,
+    });
+    doc.y = boxY + boxHeight + 8;
+  }
+
   drawRule(doc, doc.y + 6);
   doc.moveDown(1.2);
 
@@ -146,7 +167,13 @@ export const generateEstimatePdf = (data: {
   doc.fontSize(14).text(`TOTAL: ${formatCurrency(data.total)}`, boxX + 14, totalsY + 60);
 
   doc.moveDown(4.2);
-  doc.fillColor('#475569').fontSize(9).text('Presupuesto válido por 15 días. Gracias por confiar en nuestro taller.', { align: 'center' });
+  const resolvedValidityDays = Number.isFinite(Number(data.validityDays))
+    ? Math.max(1, Math.floor(Number(data.validityDays)))
+    : 15;
+  const validUntilText = data.validUntil
+    ? `hasta el ${new Date(data.validUntil).toLocaleDateString('es-AR')}`
+    : `por ${resolvedValidityDays} días`;
+  doc.fillColor('#475569').fontSize(9).text(`Presupuesto válido ${validUntilText}. Gracias por confiar en nuestro taller.`, { align: 'center' });
   return doc;
 };
 
@@ -159,6 +186,7 @@ export const generateInvoicePdf = (data: {
   laborCost: number;
   discount: number;
   total: number;
+  clientComment?: string;
   shopName?: string;
   address?: string;
   phone?: string;
@@ -174,6 +202,24 @@ export const generateInvoicePdf = (data: {
   });
 
   addItemsTable(doc, data.items);
+
+  if (data.clientComment?.trim()) {
+    const comment = data.clientComment.trim();
+    const left = doc.page.margins.left;
+    const right = doc.page.width - doc.page.margins.right;
+    const width = right - left;
+    const boxY = doc.y;
+    const boxHeight = 70;
+
+    doc.roundedRect(left, boxY, width, boxHeight, 10).fill('#f8fafc');
+    doc.fillColor('#334155').fontSize(9).text('COMENTARIO PARA EL CLIENTE', left + 12, boxY + 10);
+    doc.fillColor('#0f172a').fontSize(10).text(comment, left + 12, boxY + 26, {
+      width: width - 24,
+      height: boxHeight - 32,
+      ellipsis: true,
+    });
+    doc.y = boxY + boxHeight + 8;
+  }
 
   drawRule(doc, doc.y + 6);
   doc.moveDown(1.2);

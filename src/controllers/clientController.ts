@@ -3,6 +3,27 @@ import Client from '../models/Client';
 import Vehicle from '../models/Vehicle';
 import Appointment from '../models/Appointment';
 import WorkOrder from '../models/WorkOrder';
+import {
+  buildClientIdentityFilter,
+  normalizeClientEmail,
+  normalizeClientPhone,
+} from '../utils/clientIdentity';
+
+const getDuplicateClientMessage = (existingClient: any, phone: string, email?: string) => {
+  const duplicatedByPhone = !!phone && existingClient?.phone === phone;
+  const duplicatedByEmail = !!email && existingClient?.email === email;
+
+  if (duplicatedByPhone && duplicatedByEmail) {
+    return 'Ya existe un cliente con este teléfono y email';
+  }
+  if (duplicatedByPhone) {
+    return 'Ya existe un cliente con este teléfono';
+  }
+  if (duplicatedByEmail) {
+    return 'Ya existe un cliente con este email';
+  }
+  return 'Ya existe un cliente con estos datos';
+};
 
 // @desc    Get all clients
 // @route   GET /api/clients
@@ -56,33 +77,110 @@ export const getClientById = async (req: Request, res: Response) => {
 // @route   POST /api/clients
 // @access  Private
 export const createClient = async (req: Request, res: Response) => {
-  const { firstName, lastName, phone, email, notes } = req.body;
+  const firstName = String(req.body.firstName || '').trim();
+  const lastName = String(req.body.lastName || '').trim();
+  const phone = normalizeClientPhone(req.body.phone);
+  const email = normalizeClientEmail(req.body.email);
+  const notes = req.body.notes !== undefined ? String(req.body.notes || '').trim() : undefined;
 
-  const client = await Client.create({
-    firstName,
-    lastName,
-    phone,
-    email,
-    notes,
-  });
+  if (!firstName || !lastName || !phone) {
+    res.status(400);
+    throw new Error('Nombre, apellido y teléfono son obligatorios');
+  }
 
-  res.status(201).json(client);
+  const duplicateFilter = buildClientIdentityFilter({ phone, email });
+  const existingClient = duplicateFilter
+    ? await Client.findOne(duplicateFilter)
+    : null;
+
+  if (existingClient) {
+    let changed = false;
+
+    if (!existingClient.email && email) {
+      existingClient.email = email;
+      changed = true;
+    }
+    if (!existingClient.firstName && firstName) {
+      existingClient.firstName = firstName;
+      changed = true;
+    }
+    if (!existingClient.lastName && lastName) {
+      existingClient.lastName = lastName;
+      changed = true;
+    }
+    if (!existingClient.notes && notes) {
+      existingClient.notes = notes;
+      changed = true;
+    }
+    if (changed) {
+      await existingClient.save();
+    }
+
+    res.status(200).json({
+      client: existingClient,
+      created: false,
+      message: getDuplicateClientMessage(existingClient, phone, email),
+    });
+    return;
+  }
+
+  const client = await Client.create({ firstName, lastName, phone, email, notes });
+
+  res.status(201).json({ client, created: true });
 };
 
 // @desc    Update a client
 // @route   PATCH /api/clients/:id
 // @access  Private
 export const updateClient = async (req: Request, res: Response) => {
-  const { firstName, lastName, phone, email, notes } = req.body;
-
   const client = await Client.findById(req.params.id);
 
   if (client) {
-    client.firstName = firstName !== undefined ? firstName : client.firstName;
-    client.lastName = lastName !== undefined ? lastName : client.lastName;
-    client.phone = phone !== undefined ? phone : client.phone;
-    client.email = email !== undefined ? email : client.email;
-    client.notes = notes !== undefined ? notes : client.notes;
+    const nextFirstName =
+      req.body.firstName !== undefined
+        ? String(req.body.firstName || '').trim()
+        : String(client.firstName || '').trim();
+    const nextLastName =
+      req.body.lastName !== undefined
+        ? String(req.body.lastName || '').trim()
+        : String(client.lastName || '').trim();
+    const nextPhone =
+      req.body.phone !== undefined
+        ? normalizeClientPhone(req.body.phone)
+        : normalizeClientPhone(client.phone);
+    const nextEmail =
+      req.body.email !== undefined
+        ? normalizeClientEmail(req.body.email)
+        : normalizeClientEmail(client.email);
+    const nextNotes =
+      req.body.notes !== undefined
+        ? String(req.body.notes || '').trim()
+        : client.notes;
+
+    if (!nextFirstName || !nextLastName || !nextPhone) {
+      res.status(400);
+      throw new Error('Nombre, apellido y teléfono son obligatorios');
+    }
+
+    const duplicateFilter = buildClientIdentityFilter({
+      phone: nextPhone,
+      email: nextEmail,
+      excludeId: req.params.id,
+    });
+    const duplicatedClient = duplicateFilter
+      ? await Client.findOne(duplicateFilter)
+      : null;
+
+    if (duplicatedClient) {
+      res.status(409);
+      throw new Error(getDuplicateClientMessage(duplicatedClient, nextPhone, nextEmail));
+    }
+
+    client.firstName = nextFirstName;
+    client.lastName = nextLastName;
+    client.phone = nextPhone;
+    client.email = nextEmail;
+    client.notes = nextNotes;
 
     const updatedClient = await client.save();
     res.json(updatedClient);
