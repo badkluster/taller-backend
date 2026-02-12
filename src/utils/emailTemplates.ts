@@ -7,6 +7,11 @@ type ShopSettings = {
   emailFrom?: string;
   logoUrl?: string;
   websiteUrl?: string;
+  bankAlias?: string;
+  bankName?: string;
+  bankCbu?: string;
+  bankHolderFirstName?: string;
+  bankHolderLastName?: string;
 };
 
 const escapeHtml = (value?: string | null) =>
@@ -39,6 +44,92 @@ const renderMultilineParagraphs = (value?: string | null) => {
         ).replace(/\n/g, "<br/>")}</p>`,
     )
     .join("");
+};
+
+const resolvePrepaidPaymentDetails = (settings: ShopSettings) => {
+  const bankAlias = String(settings.bankAlias || "").trim();
+  const bankName = String(settings.bankName || "").trim();
+  const bankCbu = String(settings.bankCbu || "").trim();
+  const bankHolder = [
+    String(settings.bankHolderFirstName || "").trim(),
+    String(settings.bankHolderLastName || "").trim(),
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .trim();
+  const whatsapp = String(settings.phone || "").trim();
+
+  return {
+    bankAlias,
+    bankName,
+    bankCbu,
+    bankHolder,
+    whatsapp,
+    hasBankData: Boolean(bankAlias || bankName || bankCbu || bankHolder),
+  };
+};
+
+export const prepaidPaymentInstructionsHtml = (settings: ShopSettings) => {
+  const details = resolvePrepaidPaymentDetails(settings);
+  const bankRows = [
+    details.bankName
+      ? `<tr><td style="padding:4px 10px 4px 0; color:#64748b;">Banco</td><td style="padding:4px 0; color:#0f172a; font-weight:700;">${escapeHtml(details.bankName)}</td></tr>`
+      : "",
+    details.bankAlias
+      ? `<tr><td style="padding:4px 10px 4px 0; color:#64748b;">Alias</td><td style="padding:4px 0; color:#0f172a; font-weight:700;">${escapeHtml(details.bankAlias)}</td></tr>`
+      : "",
+    details.bankCbu
+      ? `<tr><td style="padding:4px 10px 4px 0; color:#64748b;">CBU</td><td style="padding:4px 0; color:#0f172a; font-weight:700;">${escapeHtml(details.bankCbu)}</td></tr>`
+      : "",
+    details.bankHolder
+      ? `<tr><td style="padding:4px 10px 4px 0; color:#64748b;">Titular</td><td style="padding:4px 0; color:#0f172a; font-weight:700;">${escapeHtml(details.bankHolder)}</td></tr>`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("");
+
+  const bankBlock = details.hasBankData
+    ? `
+      <div style="margin:0 0 10px;">
+        <div style="font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#1e3a8a; margin-bottom:6px; font-weight:700;">
+          Datos para transferencia
+        </div>
+        <table style="border-collapse:collapse; font-size:14px; line-height:1.5;">
+          ${bankRows}
+        </table>
+      </div>
+    `
+    : "";
+
+  const whatsappInstruction = details.whatsapp
+    ? `Una vez realizada la transferencia, enviá el comprobante por WhatsApp al <strong>${escapeHtml(details.whatsapp)}</strong>.`
+    : "Una vez realizada la transferencia, enviá el comprobante por WhatsApp para acreditarlo.";
+
+  return `
+    ${bankBlock}
+    <p style="margin:0; color:#334155; line-height:1.6;">${whatsappInstruction}</p>
+  `;
+};
+
+export const prepaidPaymentInstructionsText = (settings: ShopSettings) => {
+  const details = resolvePrepaidPaymentDetails(settings);
+  const lines: string[] = [];
+
+  if (details.hasBankData) {
+    lines.push("Datos para transferencia:");
+    if (details.bankName) lines.push(`Banco: ${details.bankName}`);
+    if (details.bankAlias) lines.push(`Alias: ${details.bankAlias}`);
+    if (details.bankCbu) lines.push(`CBU: ${details.bankCbu}`);
+    if (details.bankHolder) lines.push(`Titular: ${details.bankHolder}`);
+  }
+
+  lines.push(
+    details.whatsapp
+      ? `Una vez realizada la transferencia, enviá el comprobante por WhatsApp al ${details.whatsapp}.`
+      : "Una vez realizada la transferencia, enviá el comprobante por WhatsApp para acreditarlo.",
+  );
+
+  return lines.join("\n");
 };
 
 const normalizeWebsiteUrl = (value?: string | null) => {
@@ -234,6 +325,8 @@ export const prepaidOfferEmailTemplate = (data: {
   const customBodyHtml = renderMultilineParagraphs(data.customBody);
   const hasCustomBody = Boolean(customBodyHtml);
   const balance = Number(data.balance || 0);
+  const paymentInstructionsHtml = prepaidPaymentInstructionsHtml(data.settings);
+  const paymentInstructionsText = prepaidPaymentInstructionsText(data.settings);
   const balanceBlock =
     balance > 0
       ? `<div style="margin:0 0 16px; padding:12px 14px; border-radius:10px; background:#ecfeff; border:1px solid #a5f3fc;">
@@ -273,6 +366,9 @@ export const prepaidOfferEmailTemplate = (data: {
       </ul>
     </div>
     ${balanceBlock}
+    <div style="margin:0 0 14px; padding:12px 14px; border-radius:10px; border:1px solid #dbeafe; background:#f8fafc;">
+      ${paymentInstructionsHtml}
+    </div>
     <p style="margin:0; color:#475569; font-size:13px;">
       Si tenés dudas, respondé este email y te ayudamos.
     </p>
@@ -287,6 +383,8 @@ export const prepaidOfferEmailTemplate = (data: {
       : "Podés cargar saldo cuando quieras y usarlo más adelante en services o reparaciones.",
     "",
     balance > 0 ? `Saldo actual a favor: ${formatCurrency(balance)}` : "",
+    paymentInstructionsText,
+    "",
     "Sin obligación mensual.",
     "Podés responder este email para coordinar.",
   ]

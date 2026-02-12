@@ -1263,6 +1263,11 @@ export const sendClientPrepaidOffer = async (req: Request, res: Response) => {
       phone: settings?.phone ?? undefined,
       emailFrom: settings?.emailFrom ?? undefined,
       logoUrl: settings?.logoUrl ?? undefined,
+      bankAlias: settings?.bankAlias ?? undefined,
+      bankName: settings?.bankName ?? undefined,
+      bankCbu: settings?.bankCbu ?? undefined,
+      bankHolderFirstName: settings?.bankHolderFirstName ?? undefined,
+      bankHolderLastName: settings?.bankHolderLastName ?? undefined,
     },
   });
 

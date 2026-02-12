@@ -5,6 +5,10 @@ import AppointmentRequest from '../models/AppointmentRequest';
 import Client from '../models/Client';
 import Settings from '../models/Settings';
 import { sendEmail } from './mailer';
+import {
+  prepaidPaymentInstructionsHtml,
+  prepaidPaymentInstructionsText,
+} from './emailTemplates';
 
 const buildReminderMessage = (params: {
   clientName: string;
@@ -763,8 +767,35 @@ export const sendMonthlyPrepaidReminders = async () => {
         taller: shopName,
       };
       const subject = replaceTemplateTokens(baseSubject, vars);
-      const text = replaceTemplateTokens(baseBody, vars);
-      const html = `<div style="font-family: Arial, sans-serif; color: #0f172a; line-height:1.5; white-space: pre-line;">${text}</div>`;
+      const reminderBody = replaceTemplateTokens(baseBody, vars);
+      const paymentInstructionsText = prepaidPaymentInstructionsText({
+        phone: settings.phone ?? undefined,
+        bankAlias: settings.bankAlias ?? undefined,
+        bankName: settings.bankName ?? undefined,
+        bankCbu: settings.bankCbu ?? undefined,
+        bankHolderFirstName: settings.bankHolderFirstName ?? undefined,
+        bankHolderLastName: settings.bankHolderLastName ?? undefined,
+      });
+      const paymentInstructionsHtml = prepaidPaymentInstructionsHtml({
+        phone: settings.phone ?? undefined,
+        bankAlias: settings.bankAlias ?? undefined,
+        bankName: settings.bankName ?? undefined,
+        bankCbu: settings.bankCbu ?? undefined,
+        bankHolderFirstName: settings.bankHolderFirstName ?? undefined,
+        bankHolderLastName: settings.bankHolderLastName ?? undefined,
+      });
+      const text = [reminderBody, paymentInstructionsText]
+        .filter(Boolean)
+        .join('\n\n');
+      const safeReminderBody = escapeHtml(reminderBody).replace(/\n/g, '<br/>');
+      const html = `
+        <div style="font-family: Arial, sans-serif; color: #0f172a; line-height:1.5;">
+          <div style="margin:0 0 14px;">${safeReminderBody}</div>
+          <div style="padding:12px 14px; border-radius:10px; border:1px solid #dbeafe; background:#f8fafc;">
+            ${paymentInstructionsHtml}
+          </div>
+        </div>
+      `;
       await sendEmail({
         to: client.email,
         subject,
