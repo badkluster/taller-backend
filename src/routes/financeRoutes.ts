@@ -6,6 +6,7 @@ import {
   getInvoices,
   deleteInvoice,
   sendEstimateEmail,
+  markEstimateSentByChannel,
   sendInvoiceEmail,
   updateClientPrepaidConfig,
   getClientPrepaidSummary,
@@ -23,6 +24,7 @@ router
   .get(protect as any, admin as any, getEstimates as any)
   .post(protect as any, admin as any, createEstimate as any);
 router.route('/estimates/:id/send').post(protect as any, admin as any, sendEstimateEmail as any);
+router.route('/estimates/:id/mark-sent').post(protect as any, admin as any, markEstimateSentByChannel as any);
 router
   .route('/invoices')
   .get(protect as any, admin as any, getInvoices as any)

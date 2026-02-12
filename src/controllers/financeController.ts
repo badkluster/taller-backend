@@ -1009,10 +1009,38 @@ export const sendEstimateEmail = async (req: Request, res: Response) => {
 
   estimate.status = 'SENT';
   estimate.sentAt = new Date();
-  estimate.channelsUsed = [...(estimate.channelsUsed || []), 'EMAIL'];
+  estimate.channelsUsed = Array.from(
+    new Set([...(estimate.channelsUsed || []), 'EMAIL']),
+  ) as Array<'EMAIL' | 'WHATSAPP'>;
   await estimate.save();
 
   res.json({ message: 'Presupuesto enviado' });
+};
+
+// @desc    Mark Estimate as Sent by Channel
+// @route   POST /api/finance/estimates/:id/mark-sent
+// @access  Private
+export const markEstimateSentByChannel = async (req: Request, res: Response) => {
+  const estimate = await Estimate.findById(req.params.id);
+  if (!estimate) {
+    res.status(404);
+    throw new Error('Presupuesto no encontrado');
+  }
+
+  const channel = String(req.body?.channel || 'WHATSAPP').trim().toUpperCase();
+  if (!['EMAIL', 'WHATSAPP'].includes(channel)) {
+    res.status(400);
+    throw new Error('Canal inválido. Debe ser EMAIL o WHATSAPP');
+  }
+
+  estimate.status = 'SENT';
+  estimate.sentAt = new Date();
+  estimate.channelsUsed = Array.from(
+    new Set([...(estimate.channelsUsed || []), channel]),
+  ) as Array<'EMAIL' | 'WHATSAPP'>;
+  await estimate.save();
+
+  res.json({ message: 'Presupuesto marcado como enviado', estimate });
 };
 
 // @desc    Send Invoice Email

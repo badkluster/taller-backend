@@ -169,6 +169,48 @@ const sanitizeWorkOrderForEmployee = (workOrder: any) => {
   return plain;
 };
 
+const buildLatestEstimateSummaryByWorkOrder = async (workOrders: any[] = []) => {
+  const workOrderIds = workOrders
+    .map((workOrder) => workOrder?._id)
+    .filter(Boolean);
+
+  if (!workOrderIds.length) {
+    return new Map<string, any>();
+  }
+
+  const latestEstimates = await Estimate.aggregate([
+    { $match: { workOrderId: { $in: workOrderIds } } },
+    { $sort: { workOrderId: 1, createdAt: -1 } },
+    {
+      $group: {
+        _id: '$workOrderId',
+        estimateId: { $first: '$_id' },
+        number: { $first: '$number' },
+        status: { $first: '$status' },
+        sentAt: { $first: '$sentAt' },
+        channelsUsed: { $first: '$channelsUsed' },
+        createdAt: { $first: '$createdAt' },
+        pdfUrl: { $first: '$pdfUrl' },
+      },
+    },
+  ]);
+
+  const summaryByWorkOrder = new Map<string, any>();
+  latestEstimates.forEach((estimate) => {
+    summaryByWorkOrder.set(String(estimate._id), {
+      _id: estimate.estimateId,
+      number: estimate.number,
+      status: estimate.status,
+      sentAt: estimate.sentAt,
+      channelsUsed: estimate.channelsUsed || [],
+      createdAt: estimate.createdAt,
+      pdfUrl: estimate.pdfUrl,
+    });
+  });
+
+  return summaryByWorkOrder;
+};
+
 // @desc    Get Work Orders
 // @route   GET /api/workorders
 // @access  Private
@@ -263,7 +305,23 @@ export const getWorkOrders = async (req: Request, res: Response) => {
 
   const workOrdersPayload = isEmployee
     ? workOrders.map((workOrder) => sanitizeWorkOrderForEmployee(workOrder))
-    : workOrders;
+    : (() => {
+        const result = workOrders.map((workOrder) =>
+          typeof workOrder?.toObject === 'function'
+            ? workOrder.toObject()
+            : { ...(workOrder || {}) },
+        );
+        return result;
+      })();
+
+  if (!isEmployee) {
+    const latestEstimateByWorkOrder =
+      await buildLatestEstimateSummaryByWorkOrder(workOrders);
+    workOrdersPayload.forEach((workOrder: any) => {
+      workOrder.latestEstimate =
+        latestEstimateByWorkOrder.get(String(workOrder._id)) || null;
+    });
+  }
 
   res.json({ workOrders: workOrdersPayload, page, pages: Math.ceil(count / pageSize), totalCount: count });
 };
