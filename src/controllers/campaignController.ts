@@ -3,7 +3,15 @@ import { EmailCampaign, EmailLog } from '../models/Campaign';
 import Client from '../models/Client';
 import Settings from '../models/Settings';
 import { sendEmail } from '../utils/mailer';
-import { resolveLogoUrl } from '../utils/branding';
+import { getDefaultLogoDataUrl, resolveLogoUrl } from '../utils/branding';
+
+const escapeHtml = (value?: string | null) =>
+  String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 
 // @desc    Get Campaigns
 // @route   GET /api/campaigns
@@ -52,7 +60,17 @@ export const sendCampaign = async (req: Request, res: Response) => {
 
   const settings = await Settings.findOne();
   const shopName = settings?.shopName || 'Taller';
+  const safeShopName = escapeHtml(shopName);
   const logoUrl = resolveLogoUrl(settings?.logoUrl);
+  const fallbackLogoUrl = getDefaultLogoDataUrl();
+  const safeLogoUrl = escapeHtml(logoUrl);
+  const safeFallbackLogoUrl = escapeHtml(fallbackLogoUrl);
+  const logoFallbackAttr =
+    safeLogoUrl &&
+    safeFallbackLogoUrl &&
+    safeLogoUrl !== safeFallbackLogoUrl
+      ? ` onerror="this.onerror=null;this.src='${safeFallbackLogoUrl}'"`
+      : '';
   const address = settings?.address;
   const phone = settings?.phone;
   const emailFrom = settings?.emailFrom;
@@ -83,10 +101,10 @@ export const sendCampaign = async (req: Request, res: Response) => {
                 <table role="presentation" width="100%">
                   <tr>
                     <td style="vertical-align:middle;">
-                      <div style="font-size:18px;font-weight:800;letter-spacing:0.5px;">${shopName}</div>
+                      <div style="font-size:18px;font-weight:800;letter-spacing:0.5px;">${safeShopName}</div>
                     </td>
                     <td style="text-align:right;">
-                      ${logoUrl ? `<img src="${logoUrl}" alt="${shopName}" style="height:42px;object-fit:contain;" />` : ''}
+                      ${logoUrl ? `<img src="${safeLogoUrl}" alt="${safeShopName}" style="height:42px;object-fit:contain;"${logoFallbackAttr} />` : ''}
                     </td>
                   </tr>
                 </table>
@@ -110,7 +128,7 @@ export const sendCampaign = async (req: Request, res: Response) => {
             </tr>
             <tr>
               <td style="padding:16px 24px;background:#f8fafc;color:#94a3b8;font-size:12px;text-align:center;">
-                Gracias por confiar en ${shopName}.
+                Gracias por confiar en ${safeShopName}.
               </td>
             </tr>
           </table>

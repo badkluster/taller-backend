@@ -15,6 +15,7 @@ import {
   invoiceEmailTemplate,
   prepaidOfferEmailTemplate,
 } from '../utils/emailTemplates';
+import { resolveLogoBuffer } from '../utils/branding';
 import cloudinary from '../config/cloudinary';
 
 const DEFAULT_ESTIMATE_VALIDITY_DAYS = 15;
@@ -293,6 +294,7 @@ const generateAndAttachInvoicePdf = async (params: {
   clientName: string;
   vehicleLabel: string;
 }) => {
+  const logoBuffer = await resolveLogoBuffer(params.settings?.logoUrl);
   const baseItems = (params.invoice.items || []).map((item: any) => ({
     description: item.description || '',
     qty: Number(item.qty || 0),
@@ -314,6 +316,7 @@ const generateAndAttachInvoicePdf = async (params: {
     shopName: params.settings?.shopName,
     address: params.settings?.address ?? undefined,
     phone: params.settings?.phone ?? undefined,
+    logoBuffer,
   });
   const buffer = await buildPdfBuffer(pdfDoc);
   const uploaded = await uploadPdfAndReturnUrl(buffer, params.invoice.number, 'invoice');
@@ -375,6 +378,7 @@ const sendInvoiceEmailNow = async (params: {
           shopName: params.settings?.shopName,
           address: params.settings?.address ?? undefined,
           phone: params.settings?.phone ?? undefined,
+          logoBuffer: await resolveLogoBuffer(params.settings?.logoUrl),
         }),
       );
 
@@ -491,6 +495,7 @@ export const createEstimate = async (req: Request, res: Response) => {
       : workOrder
       ? `${(workOrder as any).clientId?.firstName || ''} ${(workOrder as any).clientId?.lastName || ''}`
       : 'Cliente';
+    const logoBuffer = await resolveLogoBuffer(settings?.logoUrl);
 
     const pdfDoc = generateEstimatePdf({
       number,
@@ -507,6 +512,7 @@ export const createEstimate = async (req: Request, res: Response) => {
       shopName: settings?.shopName,
       address: settings?.address ?? undefined,
       phone: settings?.phone ?? undefined,
+      logoBuffer,
     });
 
     const buffer = await buildPdfBuffer(pdfDoc);
@@ -947,6 +953,7 @@ export const sendEstimateEmail = async (req: Request, res: Response) => {
   if (shouldPersistEstimate) {
     await estimate.save();
   }
+  const logoBuffer = await resolveLogoBuffer(settings?.logoUrl);
 
   const pdfDoc = generateEstimatePdf({
     number: estimate.number,
@@ -963,6 +970,7 @@ export const sendEstimateEmail = async (req: Request, res: Response) => {
     shopName: settings?.shopName,
     address: settings?.address ?? undefined,
     phone: settings?.phone ?? undefined,
+    logoBuffer,
   });
   const pdfBuffer = await buildPdfBuffer(pdfDoc);
   const needsReupload = !!estimate.pdfUrl && estimate.pdfUrl.includes('/raw/upload/');
@@ -1092,6 +1100,7 @@ export const sendInvoiceEmail = async (req: Request, res: Response) => {
       ? 'Saldo a favor'
       : buildVehicleLabel(vehicle, 'Vehículo');
   const clientName = getClientDisplayName(client);
+  const logoBuffer = await resolveLogoBuffer(settings?.logoUrl);
   const invoiceDoc = generateInvoicePdf({
     number: invoice.number,
     date: new Date(),
@@ -1106,6 +1115,7 @@ export const sendInvoiceEmail = async (req: Request, res: Response) => {
     shopName: settings?.shopName,
     address: settings?.address ?? undefined,
     phone: settings?.phone ?? undefined,
+    logoBuffer,
   });
   const invoiceBuffer = await buildPdfBuffer(invoiceDoc);
   const needsReupload = !!invoice.pdfUrl && invoice.pdfUrl.includes('/raw/upload/');

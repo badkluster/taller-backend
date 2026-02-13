@@ -12,7 +12,16 @@ const drawRule = (doc: any, y: number) => {
   doc.strokeColor('#e2e8f0').lineWidth(1).moveTo(left, y).lineTo(right, y).stroke();
 };
 
-const buildDoc = (title: string, meta: { number: string; date: Date; clientName: string; vehicleLabel: string; shopName?: string; address?: string; phone?: string }) => {
+const buildDoc = (title: string, meta: {
+  number: string;
+  date: Date;
+  clientName: string;
+  vehicleLabel: string;
+  shopName?: string;
+  address?: string;
+  phone?: string;
+  logoBuffer?: Buffer;
+}) => {
   const doc = new PDFDocument({ size: 'A4', margin: 40 });
   const left = doc.page.margins.left;
   const right = doc.page.width - doc.page.margins.right;
@@ -22,7 +31,7 @@ const buildDoc = (title: string, meta: { number: string; date: Date; clientName:
   doc.rect(left, 28, width, 70).fill('#0f172a');
 
   // Shop identity
-  const logo = getDefaultLogoBuffer();
+  const logo = meta.logoBuffer || getDefaultLogoBuffer();
   const logoWidth = 52;
   const logoHeight = 52;
   const logoX = left + 14;
@@ -121,6 +130,7 @@ export const generateEstimatePdf = (data: {
   shopName?: string;
   address?: string;
   phone?: string;
+  logoBuffer?: Buffer;
 }) => {
   const doc = buildDoc('Presupuesto', {
     number: data.number,
@@ -130,6 +140,7 @@ export const generateEstimatePdf = (data: {
     shopName: data.shopName,
     address: data.address,
     phone: data.phone,
+    logoBuffer: data.logoBuffer,
   });
 
   addItemsTable(doc, data.items);
@@ -191,6 +202,7 @@ export const generateInvoicePdf = (data: {
   shopName?: string;
   address?: string;
   phone?: string;
+  logoBuffer?: Buffer;
 }) => {
   const doc = buildDoc('Factura', {
     number: data.number,
@@ -200,6 +212,7 @@ export const generateInvoicePdf = (data: {
     shopName: data.shopName,
     address: data.address,
     phone: data.phone,
+    logoBuffer: data.logoBuffer,
   });
 
   addItemsTable(doc, data.items);

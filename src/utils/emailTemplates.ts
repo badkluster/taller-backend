@@ -1,4 +1,4 @@
-import { resolveLogoUrl } from "./branding";
+import { getDefaultLogoDataUrl, resolveLogoUrl } from "./branding";
 
 type ShopSettings = {
   shopName?: string;
@@ -151,10 +151,19 @@ const resolveWebsiteUrl = (settings: ShopSettings) => {
 
 const baseLayout = (title: string, body: string, settings: ShopSettings) => {
   const logoUrl = resolveLogoUrl(settings.logoUrl);
+  const fallbackLogoUrl = getDefaultLogoDataUrl();
   const websiteUrl = resolveWebsiteUrl(settings);
   const safeWebsiteUrl = escapeHtml(websiteUrl);
+  const safeLogoUrl = escapeHtml(logoUrl);
+  const safeFallbackLogoUrl = escapeHtml(fallbackLogoUrl);
+  const onErrorLogoAttr =
+    safeLogoUrl &&
+    safeFallbackLogoUrl &&
+    safeLogoUrl !== safeFallbackLogoUrl
+      ? ` onerror="this.onerror=null;this.src='${safeFallbackLogoUrl}'"`
+      : "";
   const logoHtml = logoUrl
-    ? `<img src="${logoUrl}" alt="${settings.shopName || "Taller Mecánico"}" style="height:40px; max-width:140px; object-fit:contain;" />`
+    ? `<img src="${safeLogoUrl}" alt="${settings.shopName || "Taller Mecánico"}" style="height:40px; max-width:140px; object-fit:contain;"${onErrorLogoAttr} />`
     : "";
 
   return `
