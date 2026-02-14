@@ -6,7 +6,7 @@
   "crons": [
     { "path": "/api/cron/process-reminders", "schedule": "0 12 * * *" },
     { "path": "/api/cron/day-before-appointment-reminders", "schedule": "0 1 * * *" },
-    { "path": "/api/cron/owner-daily-summary", "schedule": "5 9 * * *" },
+    { "path": "/api/cron/owner-daily-summary", "schedule": "5 10 * * *" },
     { "path": "/api/cron/reschedule-overdue-appointments", "schedule": "15 3 * * *" }
   ],
   "routes": [
