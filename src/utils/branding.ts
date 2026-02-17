@@ -8,8 +8,68 @@ const remoteLogoBufferCache = new Map<string, Buffer>();
 const resolveLogoPath = () =>
   path.resolve(__dirname, '../../assets/logo-taller-sf.png');
 
-const normalizeLogoUrl = (logoUrl?: string | null) =>
-  String(logoUrl || '').trim();
+const decodeHtmlEntities = (value: string) =>
+  value
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
+
+const stripWrappingQuotes = (value: string) =>
+  value.replace(/^['"]+|['"]+$/g, '').trim();
+
+const firstHttpUrlFromText = (value: string): string | undefined => {
+  const absoluteMatch = value.match(/https?:\/\/[^\s"'<>]+/i);
+  if (absoluteMatch?.[0]) return absoluteMatch[0];
+
+  const protocolRelativeMatch = value.match(/\/\/[^\s"'<>]+/);
+  if (protocolRelativeMatch?.[0]) return `https:${protocolRelativeMatch[0]}`;
+
+  return undefined;
+};
+
+const normalizeLogoUrl = (logoUrl?: string | null): string => {
+  const rawValue = decodeHtmlEntities(String(logoUrl || '')).trim();
+  if (!rawValue) return '';
+
+  const candidate = stripWrappingQuotes(rawValue);
+
+  if (/^https?:\/\//i.test(candidate)) {
+    return candidate;
+  }
+  if (/^\/\//.test(candidate)) {
+    return `https:${candidate}`;
+  }
+  if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(candidate)) {
+    return candidate.replace(/\s+/g, '');
+  }
+
+  // If an HTML img snippet or mixed text was stored by mistake, recover first usable URL.
+  const srcAttrMatch = candidate.match(
+    /src\s*=\s*(['"]?)(https?:\/\/[^'"\s>]+|data:image\/[a-zA-Z0-9.+-]+;base64,[^'"\s>]+)\1/i,
+  );
+  if (srcAttrMatch?.[2]) {
+    return normalizeLogoUrl(srcAttrMatch[2]);
+  }
+
+  const malformedImgPrefixMatch = candidate.match(/^<img\s*(https?:\/\/[^\s"'<>]+)/i);
+  if (malformedImgPrefixMatch?.[1]) {
+    return normalizeLogoUrl(malformedImgPrefixMatch[1]);
+  }
+
+  const recoveredUrl = firstHttpUrlFromText(candidate);
+  if (recoveredUrl) {
+    return normalizeLogoUrl(recoveredUrl);
+  }
+
+  return '';
+};
+
+export const sanitizeLogoUrlInput = (logoUrl?: string | null): string | undefined => {
+  const normalized = normalizeLogoUrl(logoUrl);
+  return normalized || undefined;
+};
 
 const dataUrlToBuffer = (value: string): Buffer | undefined => {
   const match = value.match(/^data:image\/[a-zA-Z0-9.+-]+;base64,(.+)$/i);
@@ -54,7 +114,8 @@ const fetchLogoBuffer = async (url: string): Promise<Buffer | undefined> => {
 };
 
 export const getDefaultLogoDataUrl = (): string | undefined => {
-  if (process.env.DEFAULT_LOGO_URL) return process.env.DEFAULT_LOGO_URL;
+  const envDefault = sanitizeLogoUrlInput(process.env.DEFAULT_LOGO_URL);
+  if (envDefault) return envDefault;
   if (cachedLogoDataUrl) return cachedLogoDataUrl;
 
   try {
@@ -78,7 +139,7 @@ export const getDefaultLogoBuffer = (): Buffer | undefined => {
 };
 
 export const resolveLogoUrl = (logoUrl?: string | null): string | undefined =>
-  normalizeLogoUrl(logoUrl) || getDefaultLogoDataUrl();
+  sanitizeLogoUrlInput(logoUrl) || getDefaultLogoDataUrl();
 
 export const resolveLogoBuffer = async (
   logoUrl?: string | null,

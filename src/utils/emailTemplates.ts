@@ -1,4 +1,4 @@
-import { getDefaultLogoDataUrl, resolveLogoUrl } from "./branding";
+import { resolveLogoUrl } from "./branding";
 
 type ShopSettings = {
   shopName?: string;
@@ -151,19 +151,16 @@ const resolveWebsiteUrl = (settings: ShopSettings) => {
 
 const baseLayout = (title: string, body: string, settings: ShopSettings) => {
   const logoUrl = resolveLogoUrl(settings.logoUrl);
-  const fallbackLogoUrl = getDefaultLogoDataUrl();
   const websiteUrl = resolveWebsiteUrl(settings);
+  const safeTitle = escapeHtml(title);
+  const safeShopName = escapeHtml(settings.shopName || "Taller Mecánico");
+  const safeAddress = escapeHtml(settings.address || "");
+  const safePhone = escapeHtml(settings.phone || "Sin teléfono");
+  const safeEmailFrom = escapeHtml(settings.emailFrom || "");
   const safeWebsiteUrl = escapeHtml(websiteUrl);
   const safeLogoUrl = escapeHtml(logoUrl);
-  const safeFallbackLogoUrl = escapeHtml(fallbackLogoUrl);
-  const onErrorLogoAttr =
-    safeLogoUrl &&
-    safeFallbackLogoUrl &&
-    safeLogoUrl !== safeFallbackLogoUrl
-      ? ` onerror="this.onerror=null;this.src='${safeFallbackLogoUrl}'"`
-      : "";
   const logoHtml = logoUrl
-    ? `<img src="${safeLogoUrl}" alt="${settings.shopName || "Taller Mecánico"}" style="height:40px; max-width:140px; object-fit:contain;"${onErrorLogoAttr} />`
+    ? `<img src="${safeLogoUrl}" alt="${safeShopName}" style="height:40px; max-width:140px; object-fit:contain;" />`
     : "";
 
   return `
@@ -173,18 +170,18 @@ const baseLayout = (title: string, body: string, settings: ShopSettings) => {
         <div style="display:flex; align-items:center; gap:12px;">
           ${logoHtml}
           <div>
-            <div style="font-size:18px; font-weight:700;">${settings.shopName || "Taller Mecánico"}</div>
-            <div style="font-size:12px; opacity:.8;">${settings.address || ""}</div>
+            <div style="font-size:18px; font-weight:700;">${safeShopName}</div>
+            <div style="font-size:12px; opacity:.8;">${safeAddress}</div>
           </div>
         </div>
       </div>
       <div style="padding:24px;">
-        <h2 style="margin:0 0 12px; font-size:20px; color:#0f172a;">${title}</h2>
+        <h2 style="margin:0 0 12px; font-size:20px; color:#0f172a;">${safeTitle}</h2>
         ${body}
       </div>
       <div style="padding:16px 24px; background:#f1f5f9; font-size:12px; color:#475569;">
-        <div>📞 ${settings.phone || "Sin teléfono"}</div>
-        <div>✉️ ${settings.emailFrom || ""}</div>
+        <div>📞 ${safePhone}</div>
+        <div>✉️ ${safeEmailFrom}</div>
         ${
           websiteUrl
             ? `<div>🌐 <a href="${safeWebsiteUrl}" style="color:#2563eb; text-decoration:none;">${safeWebsiteUrl}</a></div>`
@@ -227,6 +224,104 @@ export const appointmentCreatedTemplate = (data: {
     subject: `Nuevo turno creado - ${data.vehicleLabel}`,
     html: baseLayout("Nuevo turno creado", body, data.settings),
     text: `Nuevo turno creado\nID: ${data.appointmentId}\nFecha: ${new Date(data.startAt).toLocaleString()}\nCliente: ${data.clientName}\nVehículo: ${data.vehicleLabel}\nServicio: ${data.serviceType}\n${data.notes ? `Notas: ${data.notes}` : ""}`,
+  };
+};
+
+export const appointmentClientNotificationTemplate = (data: {
+  mode: "CREATED" | "RESCHEDULED";
+  startAt: Date | string;
+  endAt: Date | string;
+  serviceType: string;
+  notes?: string;
+  clientName: string;
+  vehicleLabel: string;
+  settings: ShopSettings;
+}) => {
+  const isRescheduled = data.mode === "RESCHEDULED";
+  const title = isRescheduled ? "Turno reprogramado" : "Turno confirmado";
+  const safeClientName = escapeHtml(data.clientName || "Cliente");
+  const safeVehicleLabel = escapeHtml(data.vehicleLabel || "Vehículo");
+  const safeServiceType = escapeHtml(data.serviceType || "General");
+  const safeNotes = escapeHtml(String(data.notes || "").trim());
+
+  const formatDateTime = (value: Date | string) => {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "-";
+    return parsed.toLocaleString("es-AR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const startAtLabel = formatDateTime(data.startAt);
+  const endAtLabel = formatDateTime(data.endAt);
+  const intro = isRescheduled
+    ? "Actualizamos la fecha y hora de tu turno."
+    : "Te confirmamos el turno agendado para tu vehículo.";
+
+  const body = `
+    <p style="margin:0 0 12px; color:#334155;">Hola ${safeClientName},</p>
+    <p style="margin:0 0 14px; color:#334155;">${intro}</p>
+
+    <div style="border:1px solid #dbeafe; border-radius:12px; background:#f8fbff; padding:14px; margin:0 0 14px;">
+      <table style="width:100%; border-collapse:collapse; font-size:14px;">
+        <tr>
+          <td style="padding:6px 0; color:#64748b;">Vehículo</td>
+          <td style="padding:6px 0; color:#0f172a; font-weight:700;">${safeVehicleLabel}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0; color:#64748b;">Servicio</td>
+          <td style="padding:6px 0; color:#0f172a; font-weight:700;">${safeServiceType}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0; color:#64748b;">Inicio</td>
+          <td style="padding:6px 0; color:#0f172a; font-weight:700;">${escapeHtml(startAtLabel)}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0; color:#64748b;">Fin</td>
+          <td style="padding:6px 0; color:#0f172a; font-weight:700;">${escapeHtml(endAtLabel)}</td>
+        </tr>
+      </table>
+    </div>
+
+    ${
+      safeNotes
+        ? `<div style="margin:0 0 14px; padding:12px; border-radius:10px; border:1px solid #e2e8f0; background:#f8fafc;">
+            <div style="font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#475569; font-weight:700;">Notas</div>
+            <div style="margin-top:6px; color:#0f172a; line-height:1.6;">${safeNotes.replace(/\n/g, "<br/>")}</div>
+          </div>`
+        : ""
+    }
+
+    <p style="margin:0; color:#475569; font-size:13px;">
+      Si necesitás reprogramar, respondé este email y te ayudamos.
+    </p>
+  `;
+
+  const text = [
+    `Hola ${data.clientName || "Cliente"},`,
+    "",
+    isRescheduled
+      ? "Tu turno fue reprogramado."
+      : "Tu turno fue confirmado.",
+    `Vehículo: ${data.vehicleLabel || "Vehículo"}`,
+    `Servicio: ${data.serviceType || "General"}`,
+    `Inicio: ${startAtLabel}`,
+    `Fin: ${endAtLabel}`,
+    safeNotes ? `Notas: ${String(data.notes || "").trim()}` : "",
+    "",
+    "Si necesitás reprogramar, respondé este email y te ayudamos.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return {
+    subject: `${title} - ${data.vehicleLabel || "Vehículo"}`,
+    html: baseLayout(title, body, data.settings),
+    text,
   };
 };
 
@@ -701,6 +796,203 @@ export const ownerNewAppointmentRequestTemplate = (data: {
       body,
       data.settings,
     ),
+    text,
+  };
+};
+
+export const clientPrepaidSummaryEmailTemplate = (data: {
+  clientName: string;
+  balance: number;
+  settings: ShopSettings;
+  movements: Array<{
+    createdAt: Date | string;
+    type: string;
+    direction: string;
+    amount: number;
+    balanceAfter: number;
+    note?: string;
+  }>;
+}) => {
+  const safeClientName = escapeHtml(data.clientName);
+  const movementTypeLabels: Record<string, string> = {
+    DEPOSIT: "Ingreso de saldo",
+    USAGE_INVOICE: "Consumo por factura",
+    ADJUSTMENT_PLUS: "Ajuste manual a favor",
+    ADJUSTMENT_MINUS: "Ajuste manual en contra",
+    REFUND: "Reintegro",
+  };
+
+  const formatMovementDate = (value: Date | string) => {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return "-";
+    return parsed.toLocaleString("es-AR", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  };
+
+  const resolveIsCredit = (movement: {
+    direction?: string;
+    type?: string;
+  }) => {
+    const normalizedDirection = String(movement.direction || "").toUpperCase();
+    if (normalizedDirection === "CREDIT") return true;
+    if (normalizedDirection === "DEBIT") return false;
+    const normalizedType = String(movement.type || "").toUpperCase();
+    return normalizedType === "DEPOSIT" || normalizedType === "ADJUSTMENT_PLUS";
+  };
+
+  const movementTotals = data.movements.reduce(
+    (acc, movement) => {
+      const amount = Number(movement.amount || 0);
+      if (resolveIsCredit(movement)) {
+        acc.credit += amount;
+      } else {
+        acc.debit += amount;
+      }
+      return acc;
+    },
+    { credit: 0, debit: 0 },
+  );
+
+  const movementsRowsHtml = data.movements
+    .map((movement, index) => {
+      const normalizedType = String(movement.type || "").toUpperCase();
+      const movementLabel = movementTypeLabels[normalizedType] || normalizedType || "Movimiento";
+      const isCredit = resolveIsCredit(movement);
+      const amountLabel = `${isCredit ? "+" : "-"} ${formatCurrency(
+        Number(movement.amount || 0),
+      )}`;
+      const amountColor = isCredit ? "#166534" : "#b91c1c";
+      const noteHtml = movement.note
+        ? `<div style="margin-top:4px; color:#64748b; font-size:12px;">${escapeHtml(movement.note)}</div>`
+        : "";
+
+      return `
+        <tr>
+          <td style="padding:10px 8px; border-bottom:1px solid #e2e8f0; color:#334155; font-size:13px; background:${index % 2 === 0 ? "#ffffff" : "#f8fafc"};">
+            ${escapeHtml(formatMovementDate(movement.createdAt))}
+          </td>
+          <td style="padding:10px 8px; border-bottom:1px solid #e2e8f0; color:#0f172a; font-size:13px; background:${index % 2 === 0 ? "#ffffff" : "#f8fafc"};">
+            <strong>${escapeHtml(movementLabel)}</strong>
+            ${noteHtml}
+          </td>
+          <td style="padding:10px 8px; border-bottom:1px solid #e2e8f0; text-align:right; font-size:13px; font-weight:700; color:${amountColor}; background:${index % 2 === 0 ? "#ffffff" : "#f8fafc"};">
+            ${escapeHtml(amountLabel)}
+          </td>
+          <td style="padding:10px 8px; border-bottom:1px solid #e2e8f0; text-align:right; color:#0f172a; font-size:13px; font-weight:700; background:${index % 2 === 0 ? "#ffffff" : "#f8fafc"};">
+            ${escapeHtml(formatCurrency(Number(movement.balanceAfter || 0)))}
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  const movementsBlock = movementsRowsHtml
+    ? `
+      <table role="presentation" width="100%" style="border-collapse:collapse; margin-top:8px;">
+        <thead>
+          <tr>
+            <th align="left" style="padding:8px; background:#f1f5f9; color:#334155; font-size:12px; text-transform:uppercase; letter-spacing:.4px;">Fecha</th>
+            <th align="left" style="padding:8px; background:#f1f5f9; color:#334155; font-size:12px; text-transform:uppercase; letter-spacing:.4px;">Concepto</th>
+            <th align="right" style="padding:8px; background:#f1f5f9; color:#334155; font-size:12px; text-transform:uppercase; letter-spacing:.4px;">Monto</th>
+            <th align="right" style="padding:8px; background:#f1f5f9; color:#334155; font-size:12px; text-transform:uppercase; letter-spacing:.4px;">Saldo</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${movementsRowsHtml}
+        </tbody>
+      </table>
+    `
+    : `
+      <div style="margin-top:8px; padding:12px; border-radius:10px; border:1px dashed #cbd5e1; color:#64748b; background:#f8fafc;">
+        Todavía no registrás movimientos en tu saldo a favor.
+      </div>
+    `;
+
+  const body = `
+    <p style="margin:0 0 12px; color:#334155;">Hola ${safeClientName},</p>
+    <p style="margin:0 0 14px; color:#334155;">
+      Te compartimos el estado actualizado de tu saldo a favor.
+    </p>
+
+    <div style="margin:0 0 16px; padding:14px 16px; border-radius:12px; border:1px solid #86efac; background:#f0fdf4;">
+      <div style="font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:#166534; font-weight:700;">
+        Saldo actual disponible
+      </div>
+      <div style="margin-top:4px; font-size:26px; font-weight:800; color:#14532d;">
+        ${escapeHtml(formatCurrency(Number(data.balance || 0)))}
+      </div>
+      <div style="margin-top:4px; color:#166534; font-size:13px;">
+        Este monto podés aplicarlo en próximos servicios o reparaciones.
+      </div>
+    </div>
+
+    <table role="presentation" width="100%" style="border-collapse:separate; border-spacing:0 8px; margin:0 0 10px;">
+      <tr>
+        <td style="width:50%; padding-right:6px;">
+          <div style="border:1px solid #d1fae5; background:#ecfdf5; border-radius:10px; padding:10px 12px;">
+            <div style="font-size:12px; text-transform:uppercase; letter-spacing:.3px; color:#166534; font-weight:700;">Ingresos recientes</div>
+            <div style="margin-top:4px; color:#14532d; font-size:18px; font-weight:800;">${escapeHtml(
+              formatCurrency(Number(movementTotals.credit || 0)),
+            )}</div>
+          </div>
+        </td>
+        <td style="width:50%; padding-left:6px;">
+          <div style="border:1px solid #fee2e2; background:#fef2f2; border-radius:10px; padding:10px 12px;">
+            <div style="font-size:12px; text-transform:uppercase; letter-spacing:.3px; color:#b91c1c; font-weight:700;">Consumos recientes</div>
+            <div style="margin-top:4px; color:#7f1d1d; font-size:18px; font-weight:800;">${escapeHtml(
+              formatCurrency(Number(movementTotals.debit || 0)),
+            )}</div>
+          </div>
+        </td>
+      </tr>
+    </table>
+
+    <div style="margin:0 0 8px; font-size:14px; font-weight:700; color:#0f172a;">
+      Últimos movimientos
+    </div>
+    ${movementsBlock}
+
+    <p style="margin:14px 0 0; color:#475569; font-size:13px;">
+      Si querés consultar un movimiento puntual, respondé este email y te ayudamos.
+    </p>
+  `;
+
+  const textMovements = data.movements.length
+    ? data.movements
+        .map((movement) => {
+          const normalizedType = String(movement.type || "").toUpperCase();
+          const movementLabel = movementTypeLabels[normalizedType] || normalizedType || "Movimiento";
+          const isCredit = resolveIsCredit(movement);
+          const amountLabel = `${isCredit ? "+" : "-"} ${formatCurrency(
+            Number(movement.amount || 0),
+          )}`;
+          const noteText = movement.note ? ` (${movement.note})` : "";
+          return `${formatMovementDate(movement.createdAt)} - ${movementLabel}${noteText} - ${amountLabel} - Saldo: ${formatCurrency(Number(movement.balanceAfter || 0))}`;
+        })
+        .join("\n")
+    : "Sin movimientos aún.";
+
+  const text = [
+    `Hola ${data.clientName},`,
+    "",
+    `Saldo actual: ${formatCurrency(Number(data.balance || 0))}`,
+    `Ingresos recientes: ${formatCurrency(Number(movementTotals.credit || 0))}`,
+    `Consumos recientes: ${formatCurrency(Number(movementTotals.debit || 0))}`,
+    "",
+    "Últimos movimientos:",
+    textMovements,
+    "",
+    "Este saldo queda a tu favor para futuros servicios o reparaciones.",
+  ].join("\n");
+
+  return {
+    subject: `Resumen de saldo a favor - ${data.settings.shopName || "Taller"}`,
+    html: baseLayout("Resumen de saldo a favor", body, data.settings),
     text,
   };
 };

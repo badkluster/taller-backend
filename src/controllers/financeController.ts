@@ -11,6 +11,7 @@ import { uploadBufferToCloudinary } from '../utils/cloudinaryUpload';
 import { generateEstimatePdf, generateInvoicePdf } from '../utils/pdfGenerator';
 import { sendEmail } from '../utils/mailer';
 import {
+  clientPrepaidSummaryEmailTemplate,
   estimateEmailTemplate,
   invoiceEmailTemplate,
   prepaidOfferEmailTemplate,
@@ -1339,50 +1340,33 @@ export const sendClientPrepaidSummary = async (req: Request, res: Response) => {
     .sort({ createdAt: -1 })
     .limit(10);
 
-  const formatAmount = (value: number) =>
-    new Intl.NumberFormat('es-AR', {
-      style: 'currency',
-      currency: 'ARS',
-      maximumFractionDigits: 0,
-    }).format(Number(value || 0));
-
-  const movementRows = latestMovements
-    .map((movement: any) => {
-      const date = new Date(movement.createdAt).toLocaleString('es-AR');
-      const sign = movement.direction === 'CREDIT' ? '+' : '-';
-      return `${date} | ${movement.type} | ${sign}${formatAmount(movement.amount)} | Saldo: ${formatAmount(movement.balanceAfter)}`;
-    })
-    .join('\n');
-
   const clientName = getClientDisplayName(client);
   const balance = Number(client.prepaidBalance || 0);
-  const subject = `Resumen de saldo a favor - ${settings?.shopName || 'Taller'}`;
-  const text = [
-    `Hola ${clientName},`,
-    '',
-    `Saldo actual: ${formatAmount(balance)}`,
-    '',
-    'Últimos movimientos:',
-    movementRows || 'Sin movimientos aún.',
-    '',
-    'Recordá que este saldo queda a tu favor para futuros servicios.',
-  ].join('\n');
-  const html = `
-    <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.5;">
-      <h2 style="margin:0 0 12px;">Resumen de saldo a favor</h2>
-      <p>Hola ${clientName},</p>
-      <p>Saldo actual: <strong>${formatAmount(balance)}</strong></p>
-      <h3 style="margin:16px 0 8px;">Últimos movimientos</h3>
-      <pre style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:10px; font-size:12px; white-space:pre-wrap;">${movementRows || 'Sin movimientos aún.'}</pre>
-      <p style="margin-top:12px;">Este saldo queda a tu favor para futuros servicios.</p>
-    </div>
-  `;
+  const template = clientPrepaidSummaryEmailTemplate({
+    clientName,
+    balance,
+    movements: latestMovements.map((movement: any) => ({
+      createdAt: movement.createdAt,
+      type: movement.type,
+      direction: movement.direction,
+      amount: Number(movement.amount || 0),
+      balanceAfter: Number(movement.balanceAfter || 0),
+      note: movement.note || undefined,
+    })),
+    settings: {
+      shopName: settings?.shopName,
+      address: settings?.address ?? undefined,
+      phone: settings?.phone ?? undefined,
+      emailFrom: settings?.emailFrom ?? undefined,
+      logoUrl: settings?.logoUrl ?? undefined,
+    },
+  });
 
   await sendEmail({
     to: client.email,
-    subject,
-    text,
-    html,
+    subject: template.subject,
+    text: template.text,
+    html: template.html,
     bcc: settings?.emailFrom || process.env.EMAIL_FROM || process.env.SMTP_USER,
   });
 

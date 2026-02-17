@@ -2,9 +2,18 @@ import mongoose from 'mongoose';
 
 const workOrderSchema = new mongoose.Schema({
   appointmentId: { type: mongoose.Schema.Types.ObjectId, ref: 'Appointment', index: false },
+  sourceAppointmentRequestId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'AppointmentRequest',
+    index: true,
+  },
   vehicleId: { type: mongoose.Schema.Types.ObjectId, ref: 'Vehicle', required: true },
   clientId: { type: mongoose.Schema.Types.ObjectId, ref: 'Client', required: true },
   category: { type: String, enum: ['PRESUPUESTO', 'REPARACION', 'GENERAL'], default: 'GENERAL' },
+  quickEstimateScope: {
+    type: String,
+    enum: ['LABOR_ONLY', 'WITH_MATERIALS'],
+  },
   status: {
     type: String,
     enum: ['PRESUPUESTO', 'EN_PROCESO', 'COMPLETADA', 'CANCELADA'],

@@ -1168,8 +1168,10 @@ export const confirmAppointmentRequest = async (
     workOrder = await WorkOrder.create({
       vehicleId: vehicle._id,
       clientId: client._id,
+      sourceAppointmentRequestId: requestDoc._id,
       status: "PRESUPUESTO",
       category: "PRESUPUESTO",
+      quickEstimateScope: requestDoc.quickEstimateScope,
       workDetailsText: quickEstimateWorkDetails,
       items: [],
       laborCost: 0,

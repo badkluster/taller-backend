@@ -29,8 +29,6 @@ const buildReminderMessage = (params: {
 };
 
 const DEFAULT_TIME_SLOTS = [
-  '08:30',
-  '09:00',
   '09:30',
   '10:00',
   '10:30',
@@ -245,9 +243,6 @@ export const rescheduleOverdueAppointments = async () => {
   }).select('startAt');
 
   const occupiedSlots = new Set(existingAppointments.map((appt) => formatSlot(appt.startAt)));
-  const earliestExisting = existingAppointments
-    .map((appt) => appt.startAt)
-    .sort((a, b) => a.getTime() - b.getTime())[0];
 
   const results = { rescheduled: 0, noShow: 0, completedBudget: 0, skipped: 0 };
 
@@ -298,10 +293,9 @@ export const rescheduleOverdueAppointments = async () => {
 
     let chosenSlot = DEFAULT_TIME_SLOTS.find((slot) => !occupiedSlots.has(slot));
     if (!chosenSlot) {
-      chosenSlot = earliestExisting ? formatSlot(earliestExisting) : DEFAULT_TIME_SLOTS[0];
-    } else {
-      occupiedSlots.add(chosenSlot);
+      chosenSlot = DEFAULT_TIME_SLOTS[0];
     }
+    occupiedSlots.add(chosenSlot);
 
     const newStart = buildDateTime(targetDate, chosenSlot);
     const newEnd = new Date(newStart.getTime() + Math.max(durationMs, 30 * 60 * 1000));

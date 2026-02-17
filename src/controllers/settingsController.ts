@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Settings from "../models/Settings";
 import { processMaintenanceReminders } from "../utils/cronProcessor";
 import WorkOrder from "../models/WorkOrder";
+import { sanitizeLogoUrlInput } from "../utils/branding";
 
 const DEFAULT_ESTIMATE_VALIDITY_DAYS = 15;
 const MAX_ESTIMATE_VALIDITY_DAYS = 365;
@@ -87,6 +88,14 @@ export const getSettings = async (req: Request, res: Response) => {
         (settings as any).prepaidReminderEnabled = false;
         shouldSave = true;
       }
+      const normalizedLogoUrl = sanitizeLogoUrlInput(
+        (settings as any).logoUrl,
+      );
+      const logoValueToPersist = normalizedLogoUrl || "";
+      if (String((settings as any).logoUrl || "") !== logoValueToPersist) {
+        settings.logoUrl = logoValueToPersist;
+        shouldSave = true;
+      }
       if (shouldSave) {
         await settings.save();
       }
@@ -114,7 +123,9 @@ export const updateSettings = async (req: Request, res: Response) => {
       if (req.body.invoiceSeriesPrefix !== undefined) {
         settings.invoiceSeriesPrefix = req.body.invoiceSeriesPrefix;
       }
-      if (req.body.logoUrl !== undefined) settings.logoUrl = req.body.logoUrl;
+      if (req.body.logoUrl !== undefined) {
+        settings.logoUrl = sanitizeLogoUrlInput(req.body.logoUrl) || "";
+      }
       if (req.body.bankAlias !== undefined) settings.bankAlias = req.body.bankAlias;
       if (req.body.bankName !== undefined) settings.bankName = req.body.bankName;
       if (req.body.bankCbu !== undefined) settings.bankCbu = req.body.bankCbu;
@@ -215,6 +226,7 @@ export const updateSettings = async (req: Request, res: Response) => {
         ...req.body,
         estimateValidityDays: normalizedDays,
         prepaidReminderDay: normalizedReminderDay,
+        logoUrl: sanitizeLogoUrlInput(req.body.logoUrl) || "",
       });
       res.status(201).json(newSettings);
     }

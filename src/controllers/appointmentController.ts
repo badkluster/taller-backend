@@ -6,7 +6,7 @@ import Settings from '../models/Settings';
 import { sendEmail } from '../utils/mailer';
 import {
   appointmentCancelledTemplate,
-  appointmentCreatedTemplate,
+  appointmentClientNotificationTemplate,
 } from '../utils/emailTemplates';
 import WorkOrder from '../models/WorkOrder';
 import { Estimate } from '../models/Finance';
@@ -26,6 +26,70 @@ const buildPublicFrontendUrl = (path: string) => {
   const base = resolveFrontendBaseUrl();
   if (!base) return undefined;
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
+};
+
+const getClientDisplayName = (client?: any) =>
+  `${client?.firstName || ''} ${client?.lastName || ''}`.trim() || 'Cliente';
+
+const getVehicleLabel = (vehicle?: any) => {
+  const make = String(vehicle?.make || '').trim();
+  const model = String(vehicle?.model || '').trim();
+  const plate = String(vehicle?.plateNormalized || vehicle?.plateRaw || '').trim();
+  const joined = [make, model].filter(Boolean).join(' ').trim();
+  if (joined && plate) return `${joined} (${plate})`;
+  if (joined) return joined;
+  if (plate) return plate;
+  return 'Vehículo';
+};
+
+const getServiceTypeLabel = (serviceType?: string) => {
+  const normalized = String(serviceType || '').trim().toUpperCase();
+  if (normalized === 'REPARACION') return 'Reparación';
+  if (normalized === 'PRESUPUESTO') return 'Presupuesto';
+  if (normalized === 'DIAGNOSTICO') return 'Diagnóstico';
+  if (!normalized) return 'General';
+  return normalized;
+};
+
+const sendAppointmentClientNotificationEmail = async (params: {
+  appointment: any;
+  mode: 'CREATED' | 'RESCHEDULED';
+  settingsDoc?: any;
+}) => {
+  const [client, vehicle, settings] = await Promise.all([
+    Client.findById(params.appointment.clientId),
+    Vehicle.findById(params.appointment.vehicleId),
+    params.settingsDoc ? Promise.resolve(params.settingsDoc) : Settings.findOne(),
+  ]);
+
+  if (!client?.email) return false;
+
+  const template = appointmentClientNotificationTemplate({
+    mode: params.mode,
+    startAt: params.appointment.startAt,
+    endAt: params.appointment.endAt,
+    serviceType: getServiceTypeLabel(params.appointment.serviceType),
+    notes: params.appointment.notes ?? undefined,
+    clientName: getClientDisplayName(client),
+    vehicleLabel: getVehicleLabel(vehicle),
+    settings: {
+      shopName: settings?.shopName,
+      address: settings?.address ?? undefined,
+      phone: settings?.phone ?? undefined,
+      emailFrom: settings?.emailFrom ?? undefined,
+      logoUrl: settings?.logoUrl ?? undefined,
+    },
+  });
+
+  await sendEmail({
+    to: client.email,
+    subject: template.subject,
+    html: template.html,
+    text: template.text,
+    bcc: settings?.emailFrom || process.env.EMAIL_FROM || process.env.SMTP_USER,
+  });
+
+  return true;
 };
 
 const toWorkshopDayKey = (dateValue: Date | string) => {
@@ -139,39 +203,11 @@ export const createAppointment = async (req: Request, res: Response) => {
   });
 
   try {
-    const [client, vehicle] = await Promise.all([
-      Client.findById(clientId),
-      Vehicle.findById(vehicleId),
-    ]);
-
-    const emailFrom = settings?.emailFrom || process.env.EMAIL_FROM || process.env.SMTP_USER;
-    if (emailFrom) {
-      const template = appointmentCreatedTemplate({
-        appointmentId: appointment._id.toString(),
-        startAt: appointment.startAt,
-        endAt: appointment.endAt,
-        serviceType: appointment.serviceType,
-        notes: appointment.notes ?? undefined,
-        clientName: client ? `${client.firstName} ${client.lastName}` : 'Cliente',
-        clientPhone: client?.phone,
-        clientEmail: client?.email ?? undefined,
-        vehicleLabel: vehicle ? `${vehicle.make} ${vehicle.model} (${vehicle.plateNormalized})` : 'Vehículo',
-        settings: {
-          shopName: settings?.shopName,
-          address: settings?.address ?? undefined,
-          phone: settings?.phone ?? undefined,
-          emailFrom: settings?.emailFrom ?? undefined,
-          logoUrl: settings?.logoUrl ?? undefined,
-        },
-      });
-
-      await sendEmail({
-        to: emailFrom,
-        subject: template.subject,
-        html: template.html,
-        text: template.text,
-      });
-    }
+    await sendAppointmentClientNotificationEmail({
+      appointment,
+      mode: 'CREATED',
+      settingsDoc: settings,
+    });
   } catch (error) {
     // Email errors should not block appointment creation
     console.error('Error enviando email de turno:', error);
@@ -191,6 +227,16 @@ export const updateAppointment = async (req: Request, res: Response) => {
       res.status(400);
       throw new Error('El turno ya está completado y no puede editarse');
     }
+
+    const previousStartAtMs = appointment.startAt
+      ? new Date(appointment.startAt).getTime()
+      : null;
+    const previousEndAtMs = appointment.endAt
+      ? new Date(appointment.endAt).getTime()
+      : null;
+
+    let startAtChanged = false;
+    let endAtChanged = false;
 
     if (req.body.startAt) {
       const startDate = new Date(req.body.startAt);
@@ -214,7 +260,14 @@ export const updateAppointment = async (req: Request, res: Response) => {
         res.status(400);
         throw new Error('No se puede reprogramar a una fecha pasada');
       }
-      appointment.startAt = req.body.startAt;
+      const previousStartIso = appointment.startAt
+        ? new Date(appointment.startAt).toISOString()
+        : '';
+      const nextStartIso = startDate.toISOString();
+      if (previousStartIso !== nextStartIso) {
+        startAtChanged = true;
+      }
+      appointment.startAt = startDate;
     }
 
     if (req.body.endAt) {
@@ -223,7 +276,14 @@ export const updateAppointment = async (req: Request, res: Response) => {
         res.status(400);
         throw new Error('La fecha de fin no puede ser pasada');
       }
-      appointment.endAt = req.body.endAt;
+      const previousEndIso = appointment.endAt
+        ? new Date(appointment.endAt).toISOString()
+        : '';
+      const nextEndIso = endDate.toISOString();
+      if (previousEndIso !== nextEndIso) {
+        endAtChanged = true;
+      }
+      appointment.endAt = endDate;
     }
 
     if (appointment.endAt && appointment.startAt && appointment.endAt < appointment.startAt) {
@@ -238,6 +298,33 @@ export const updateAppointment = async (req: Request, res: Response) => {
     appointment.status = req.body.status || appointment.status;
 
     const updatedAppointment = await appointment.save();
+    const currentStartAtMs = updatedAppointment.startAt
+      ? new Date(updatedAppointment.startAt).getTime()
+      : null;
+    const currentEndAtMs = updatedAppointment.endAt
+      ? new Date(updatedAppointment.endAt).getTime()
+      : null;
+    const wasRescheduled =
+      startAtChanged ||
+      endAtChanged ||
+      (previousStartAtMs !== null &&
+        currentStartAtMs !== null &&
+        previousStartAtMs !== currentStartAtMs) ||
+      (previousEndAtMs !== null &&
+        currentEndAtMs !== null &&
+        previousEndAtMs !== currentEndAtMs);
+
+    if (wasRescheduled) {
+      try {
+        await sendAppointmentClientNotificationEmail({
+          appointment: updatedAppointment,
+          mode: 'RESCHEDULED',
+        });
+      } catch (error) {
+        console.error('Error enviando email de reprogramación de turno:', error);
+      }
+    }
+
     res.json(updatedAppointment);
   } else {
     res.status(404);

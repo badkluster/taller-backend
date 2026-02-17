@@ -3,7 +3,7 @@ import { EmailCampaign, EmailLog } from '../models/Campaign';
 import Client from '../models/Client';
 import Settings from '../models/Settings';
 import { sendEmail } from '../utils/mailer';
-import { getDefaultLogoDataUrl, resolveLogoUrl } from '../utils/branding';
+import { resolveLogoUrl } from '../utils/branding';
 
 const escapeHtml = (value?: string | null) =>
   String(value || '')
@@ -62,18 +62,13 @@ export const sendCampaign = async (req: Request, res: Response) => {
   const shopName = settings?.shopName || 'Taller';
   const safeShopName = escapeHtml(shopName);
   const logoUrl = resolveLogoUrl(settings?.logoUrl);
-  const fallbackLogoUrl = getDefaultLogoDataUrl();
   const safeLogoUrl = escapeHtml(logoUrl);
-  const safeFallbackLogoUrl = escapeHtml(fallbackLogoUrl);
-  const logoFallbackAttr =
-    safeLogoUrl &&
-    safeFallbackLogoUrl &&
-    safeLogoUrl !== safeFallbackLogoUrl
-      ? ` onerror="this.onerror=null;this.src='${safeFallbackLogoUrl}'"`
-      : '';
   const address = settings?.address;
   const phone = settings?.phone;
   const emailFrom = settings?.emailFrom;
+  const safeAddress = escapeHtml(address);
+  const safePhone = escapeHtml(phone);
+  const safeEmailFrom = escapeHtml(emailFrom);
   const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
   const baseUrl = process.env.API_BASE_URL || `${req.protocol}://${req.get('host')}`;
 
@@ -92,7 +87,8 @@ export const sendCampaign = async (req: Request, res: Response) => {
         client.email,
       )}`;
       const ctaUrl = `${frontendUrl}/`;
-      const safeBody = (campaign.body || '').replace(/\n/g, '<br/>');
+      const safeBody = escapeHtml(campaign.body || '').replace(/\n/g, '<br/>');
+      const safeSubject = escapeHtml(campaign.subject || '');
       const html = `
         <div style="margin:0;background:#f8fafc;padding:24px 0;font-family:Arial,sans-serif;color:#0f172a;">
           <table role="presentation" cellspacing="0" cellpadding="0" width="100%" style="max-width:680px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;border:1px solid #e2e8f0;">
@@ -104,7 +100,7 @@ export const sendCampaign = async (req: Request, res: Response) => {
                       <div style="font-size:18px;font-weight:800;letter-spacing:0.5px;">${safeShopName}</div>
                     </td>
                     <td style="text-align:right;">
-                      ${logoUrl ? `<img src="${safeLogoUrl}" alt="${safeShopName}" style="height:42px;object-fit:contain;"${logoFallbackAttr} />` : ''}
+                      ${logoUrl ? `<img src="${safeLogoUrl}" alt="${safeShopName}" style="height:42px;object-fit:contain;" />` : ''}
                     </td>
                   </tr>
                 </table>
@@ -112,7 +108,7 @@ export const sendCampaign = async (req: Request, res: Response) => {
             </tr>
             <tr>
               <td style="padding:28px;">
-                <div style="font-size:20px;font-weight:700;margin-bottom:12px;">${campaign.subject}</div>
+                <div style="font-size:20px;font-weight:700;margin-bottom:12px;">${safeSubject}</div>
                 <div style="font-size:15px;line-height:1.6;color:#334155;">${safeBody}</div>
                 <div style="margin-top:20px;">
                   <a href="${ctaUrl}" style="display:inline-block;background:#2563eb;color:#ffffff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:10px;">
@@ -120,9 +116,9 @@ export const sendCampaign = async (req: Request, res: Response) => {
                   </a>
                 </div>
                 <div style="margin-top:24px;padding:16px;border-radius:12px;background:#f1f5f9;color:#475569;font-size:13px;">
-                  ${address ? `<div><strong>Dirección:</strong> ${address}</div>` : ''}
-                  ${phone ? `<div><strong>Teléfono:</strong> ${phone}</div>` : ''}
-                  ${emailFrom ? `<div><strong>Email:</strong> ${emailFrom}</div>` : ''}
+                  ${address ? `<div><strong>Dirección:</strong> ${safeAddress}</div>` : ''}
+                  ${phone ? `<div><strong>Teléfono:</strong> ${safePhone}</div>` : ''}
+                  ${emailFrom ? `<div><strong>Email:</strong> ${safeEmailFrom}</div>` : ''}
                 </div>
               </td>
             </tr>

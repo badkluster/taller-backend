@@ -3,6 +3,7 @@ import WorkOrder from '../models/WorkOrder';
 import { Estimate, Invoice } from '../models/Finance';
 import Vehicle from '../models/Vehicle';
 import Client from '../models/Client';
+import AppointmentRequest from '../models/AppointmentRequest';
 import { normalizePlate } from '../utils/normalizePlate';
 import cloudinary from '../config/cloudinary';
 import Appointment from '../models/Appointment';
@@ -167,6 +168,60 @@ const sanitizeWorkOrderForEmployee = (workOrder: any) => {
   delete plain.originalEstimateNumber;
 
   return plain;
+};
+
+const normalizeQuickEstimateScope = (rawScope?: unknown) => {
+  const normalized = String(rawScope || '')
+    .trim()
+    .toUpperCase();
+  if (normalized === 'LABOR_ONLY' || normalized === 'WITH_MATERIALS') {
+    return normalized;
+  }
+  return '';
+};
+
+const ensureWorkOrderQuickEstimateTraceability = async (workOrder: any) => {
+  const currentScope = normalizeQuickEstimateScope(workOrder?.quickEstimateScope);
+  const currentLinkedRequestId = String(
+    workOrder?.sourceAppointmentRequestId?._id ||
+      workOrder?.sourceAppointmentRequestId ||
+      '',
+  ).trim();
+
+  if (currentScope && currentLinkedRequestId) return;
+
+  const linkedRequestQuery = currentLinkedRequestId
+    ? { _id: currentLinkedRequestId }
+    : {
+        confirmedWorkOrderId: workOrder._id,
+        requestType: 'quick_estimate',
+      };
+
+  const linkedRequest = await AppointmentRequest.findOne(linkedRequestQuery).select(
+    '_id requestType quickEstimateScope',
+  );
+  if (!linkedRequest) return;
+
+  const normalizedRequestType = String(linkedRequest.requestType || '').toLowerCase();
+  if (normalizedRequestType !== 'quick_estimate') return;
+
+  let shouldSave = false;
+  if (!currentLinkedRequestId) {
+    workOrder.sourceAppointmentRequestId = linkedRequest._id;
+    shouldSave = true;
+  }
+
+  if (!currentScope) {
+    const recoveredScope = normalizeQuickEstimateScope(linkedRequest.quickEstimateScope);
+    if (recoveredScope) {
+      workOrder.quickEstimateScope = recoveredScope;
+      shouldSave = true;
+    }
+  }
+
+  if (shouldSave) {
+    await workOrder.save();
+  }
 };
 
 const buildLatestEstimateSummaryByWorkOrder = async (workOrders: any[] = []) => {
@@ -385,9 +440,19 @@ export const getWorkOrderById = async (req: Request, res: Response) => {
   const workOrder = await WorkOrder.findById(req.params.id)
     .populate('vehicleId')
     .populate('clientId')
-    .populate('appointmentId');
+    .populate('appointmentId')
+    .populate(
+      'sourceAppointmentRequestId',
+      'requestType status createdAt confirmedAt quickEstimateScope confirmedWorkOrderId',
+    );
 
   if (workOrder) {
+    await ensureWorkOrderQuickEstimateTraceability(workOrder);
+    await workOrder.populate(
+      'sourceAppointmentRequestId',
+      'requestType status createdAt confirmedAt quickEstimateScope confirmedWorkOrderId',
+    );
+
     if (isEmployee) {
       const category = String(workOrder.category || '').toUpperCase();
       const status = String(workOrder.status || '').toUpperCase();
