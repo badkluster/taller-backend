@@ -44,20 +44,46 @@ const DEFAULT_TIME_SLOTS = [
   '17:00',
 ];
 
-const formatSlot = (date: Date) =>
-  `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+const WORKSHOP_TIME_ZONE =
+  process.env.WORKSHOP_TIME_ZONE || 'America/Argentina/Buenos_Aires';
+const WORKSHOP_UTC_OFFSET = process.env.WORKSHOP_UTC_OFFSET || '-03:00';
 
-const buildDateTime = (baseDate: Date, slot: string) => {
-  const [hours, minutes] = slot.split(':').map((val) => Number(val));
-  return new Date(
-    baseDate.getFullYear(),
-    baseDate.getMonth(),
-    baseDate.getDate(),
-    hours,
-    minutes,
-    0,
-    0,
-  );
+const getWorkshopDateTimeParts = (dateValue: Date | string) => {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: WORKSHOP_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(dateValue));
+
+  const values: Record<string, string> = {};
+  parts.forEach((part) => {
+    if (part.type !== 'literal') values[part.type] = part.value;
+  });
+
+  return {
+    year: values.year || '1970',
+    month: values.month || '01',
+    day: values.day || '01',
+    hour: values.hour || '00',
+    minute: values.minute || '00',
+  };
+};
+
+const toWorkshopDayKey = (dateValue: Date | string) => {
+  const { year, month, day } = getWorkshopDateTimeParts(dateValue);
+  return `${year}-${month}-${day}`;
+};
+
+const buildWorkshopDateTime = (dayKey: string, slot: string) =>
+  new Date(`${dayKey}T${slot}:00${WORKSHOP_UTC_OFFSET}`);
+
+const formatSlot = (date: Date) => {
+  const { hour, minute } = getWorkshopDateTimeParts(date);
+  return `${hour}:${minute}`;
 };
 
 export const processReminders = async () => {
@@ -209,33 +235,17 @@ const normalizeReminderDay = (value: unknown) => {
 
 export const rescheduleOverdueAppointments = async () => {
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const targetDate = new Date(startOfToday);
-  targetDate.setDate(targetDate.getDate() + 1);
+  const todayWorkshopDayKey = toWorkshopDayKey(now);
+  const startOfToday = new Date(`${todayWorkshopDayKey}T00:00:00.000${WORKSHOP_UTC_OFFSET}`);
+  const targetDayKey = todayWorkshopDayKey;
 
   const overdueAppointments = await Appointment.find({
     status: { $in: ['CONFIRMED', 'IN_PROGRESS'] },
     endAt: { $lt: startOfToday },
   });
 
-  const targetStart = new Date(
-    targetDate.getFullYear(),
-    targetDate.getMonth(),
-    targetDate.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-  const targetEnd = new Date(
-    targetDate.getFullYear(),
-    targetDate.getMonth(),
-    targetDate.getDate(),
-    23,
-    59,
-    59,
-    999,
-  );
+  const targetStart = new Date(`${targetDayKey}T00:00:00.000${WORKSHOP_UTC_OFFSET}`);
+  const targetEnd = new Date(`${targetDayKey}T23:59:59.999${WORKSHOP_UTC_OFFSET}`);
 
   const existingAppointments = await Appointment.find({
     startAt: { $gte: targetStart, $lte: targetEnd },
@@ -291,13 +301,21 @@ export const rescheduleOverdueAppointments = async () => {
         ? appointment.endAt.getTime() - appointment.startAt.getTime()
         : 60 * 60 * 1000;
 
-    let chosenSlot = DEFAULT_TIME_SLOTS.find((slot) => !occupiedSlots.has(slot));
+    const preferredSlot = appointment.startAt ? formatSlot(appointment.startAt) : null;
+    const validPreferredSlot =
+      preferredSlot && DEFAULT_TIME_SLOTS.includes(preferredSlot)
+        ? preferredSlot
+        : null;
+    let chosenSlot =
+      validPreferredSlot && !occupiedSlots.has(validPreferredSlot)
+        ? validPreferredSlot
+        : DEFAULT_TIME_SLOTS.find((slot) => !occupiedSlots.has(slot));
     if (!chosenSlot) {
       chosenSlot = DEFAULT_TIME_SLOTS[0];
     }
     occupiedSlots.add(chosenSlot);
 
-    const newStart = buildDateTime(targetDate, chosenSlot);
+    const newStart = buildWorkshopDateTime(targetDayKey, chosenSlot);
     const newEnd = new Date(newStart.getTime() + Math.max(durationMs, 30 * 60 * 1000));
 
     appointment.startAt = newStart;

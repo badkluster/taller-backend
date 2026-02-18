@@ -5,9 +5,11 @@
   ],
   "crons": [
     { "path": "/api/cron/process-reminders", "schedule": "0 12 * * *" },
+    { "path": "/api/cron/maintenance-reminders", "schedule": "0 12 * * *" },
     { "path": "/api/cron/day-before-appointment-reminders", "schedule": "0 1 * * *" },
     { "path": "/api/cron/owner-daily-summary", "schedule": "5 10 * * *" },
-    { "path": "/api/cron/reschedule-overdue-appointments", "schedule": "15 3 * * *" }
+    { "path": "/api/cron/reschedule-overdue-appointments", "schedule": "15 3 * * *" },
+    { "path": "/api/cron/prepaid-monthly-reminders", "schedule": "0 13 * * *" }
   ],
   "routes": [
     { "src": "/(.*)", "dest": "api/[...path].ts" }
