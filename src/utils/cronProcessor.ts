@@ -3,6 +3,7 @@ import Appointment from '../models/Appointment';
 import WorkOrder from '../models/WorkOrder';
 import AppointmentRequest from '../models/AppointmentRequest';
 import Client from '../models/Client';
+import CronExecution from '../models/CronExecution';
 import Settings from '../models/Settings';
 import { sendEmail } from './mailer';
 import {
@@ -469,43 +470,66 @@ export const sendOwnerDailySummary = async () => {
   }
 
   const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
-  const endOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+  const summaryDayKey = toWorkshopDayKey(now);
 
-  const [appointments, pendingRequests] = await Promise.all([
-    Appointment.find({
-      startAt: { $gte: startOfToday, $lte: endOfToday },
-    })
-      .populate('clientId', 'firstName lastName')
-      .populate('vehicleId', 'make model plateNormalized')
-      .sort({ startAt: 1 }),
-    AppointmentRequest.find({ status: 'PENDING' }).sort({ createdAt: -1 }).limit(30),
-  ]);
+  try {
+    await CronExecution.create({
+      job: 'owner-daily-summary',
+      dayKey: summaryDayKey,
+    });
+  } catch (error: any) {
+    if (error?.code === 11000) {
+      return {
+        sent: false,
+        reason: 'ALREADY_SENT_FOR_DAY',
+        dayKey: summaryDayKey,
+        appointments: 0,
+        pendingRequests: 0,
+      };
+    }
 
-  const statusTotals = appointments.reduce(
-    (acc, appointment) => {
-      if (appointment.status === 'CONFIRMED') acc.confirmed += 1;
-      if (appointment.status === 'IN_PROGRESS') acc.inProgress += 1;
-      if (appointment.status === 'SCHEDULED') acc.scheduled += 1;
-      return acc;
-    },
-    { confirmed: 0, inProgress: 0, scheduled: 0 },
-  );
+    throw error;
+  }
 
-  const dayLabel = startOfToday.toLocaleDateString('es-AR', {
-    weekday: 'long',
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-  });
+  const startOfToday = new Date(`${summaryDayKey}T00:00:00.000${WORKSHOP_UTC_OFFSET}`);
+  const endOfToday = new Date(`${summaryDayKey}T23:59:59.999${WORKSHOP_UTC_OFFSET}`);
 
-  const buildSummaryCard = (params: {
-    label: string;
-    value: number;
-    backgroundColor: string;
-    borderColor: string;
-    textColor: string;
-  }) => `
+  try {
+    const [appointments, pendingRequests] = await Promise.all([
+      Appointment.find({
+        startAt: { $gte: startOfToday, $lte: endOfToday },
+      })
+        .populate('clientId', 'firstName lastName')
+        .populate('vehicleId', 'make model plateNormalized')
+        .sort({ startAt: 1 }),
+      AppointmentRequest.find({ status: 'PENDING' }).sort({ createdAt: -1 }).limit(30),
+    ]);
+
+    const statusTotals = appointments.reduce(
+      (acc, appointment) => {
+        if (appointment.status === 'CONFIRMED') acc.confirmed += 1;
+        if (appointment.status === 'IN_PROGRESS') acc.inProgress += 1;
+        if (appointment.status === 'SCHEDULED') acc.scheduled += 1;
+        return acc;
+      },
+      { confirmed: 0, inProgress: 0, scheduled: 0 },
+    );
+
+    const dayLabel = startOfToday.toLocaleDateString('es-AR', {
+      timeZone: WORKSHOP_TIME_ZONE,
+      weekday: 'long',
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+
+    const buildSummaryCard = (params: {
+      label: string;
+      value: number;
+      backgroundColor: string;
+      borderColor: string;
+      textColor: string;
+    }) => `
     <td style="width: 25%; padding: 0;">
       <div style="padding: 12px 10px; border-radius: 12px; border: 1px solid ${params.borderColor}; background: ${params.backgroundColor}; text-align: center;">
         <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; color: ${params.textColor}; opacity: 0.9;">
@@ -518,24 +542,24 @@ export const sendOwnerDailySummary = async () => {
     </td>
   `;
 
-  const appointmentItems = appointments
-    .map((appointment) => {
-      const client = appointment.clientId as any;
-      const vehicle = appointment.vehicleId as any;
-      const clientName =
-        `${client?.firstName || ''} ${client?.lastName || ''}`.trim() || 'Cliente';
-      const vehicleLabel = [vehicle?.make, vehicle?.model, vehicle?.plateNormalized]
-        .filter(Boolean)
-        .join(' ');
-      const slot = new Date(appointment.startAt).toLocaleTimeString('es-AR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-      const statusLabel = mapAppointmentStatusToLabel(appointment.status);
-      const statusStyle = resolveAppointmentStatusBadgeStyle(appointment.status);
+    const appointmentItems = appointments
+      .map((appointment) => {
+        const client = appointment.clientId as any;
+        const vehicle = appointment.vehicleId as any;
+        const clientName =
+          `${client?.firstName || ''} ${client?.lastName || ''}`.trim() || 'Cliente';
+        const vehicleLabel = [vehicle?.make, vehicle?.model, vehicle?.plateNormalized]
+          .filter(Boolean)
+          .join(' ');
+        const slot = new Date(appointment.startAt).toLocaleTimeString('es-AR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        });
+        const statusLabel = mapAppointmentStatusToLabel(appointment.status);
+        const statusStyle = resolveAppointmentStatusBadgeStyle(appointment.status);
 
-      return `
+        return `
         <li style="margin: 0 0 10px; padding: 0 0 10px; border-bottom: 1px solid #e2e8f0;">
           <div style="margin: 0 0 4px;">
             <span style="display: inline-block; min-width: 74px; font-weight: 700; color: #0f172a;">${escapeHtml(slot)}</span>
@@ -545,36 +569,36 @@ export const sendOwnerDailySummary = async () => {
             ${escapeHtml(statusLabel)}
           </span>
         </li>
-      `;
-    })
-    .join('');
+        `;
+      })
+      .join('');
 
-  const pendingRequestItems = pendingRequests
-    .map((request) => {
-      const vehicleLabel = [
-        request.vehicleData?.make,
-        request.vehicleData?.model,
-        request.vehicleData?.plateNormalized,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      const suggested = (request.suggestedDates || [])
-        .slice(0, 3)
-        .map((date: Date) => new Date(date).toLocaleDateString('es-AR'))
-        .join(', ');
+    const pendingRequestItems = pendingRequests
+      .map((request) => {
+        const vehicleLabel = [
+          request.vehicleData?.make,
+          request.vehicleData?.model,
+          request.vehicleData?.plateNormalized,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const suggested = (request.suggestedDates || [])
+          .slice(0, 3)
+          .map((date: Date) => new Date(date).toLocaleDateString('es-AR'))
+          .join(', ');
 
-      return `
+        return `
         <li style="margin: 0 0 10px; padding: 0 0 10px; border-bottom: 1px solid #e2e8f0; color: #1e293b;">
           <strong>${escapeHtml(request.clientName)}</strong>${vehicleLabel ? ` - ${escapeHtml(vehicleLabel)}` : ''}
           <br />
           <span>${escapeHtml(mapRequestTypeToLabel(request.requestType))}</span>
           ${suggested ? `<span style="color: #475569;"> - Fechas sugeridas: ${escapeHtml(suggested)}</span>` : ''}
         </li>
-      `;
-    })
-    .join('');
+        `;
+      })
+      .join('');
 
-  const html = `
+    const html = `
     <div style="margin: 0; padding: 22px 0; background: #eef2f7;">
       <div style="max-width: 720px; margin: 0 auto; padding: 0 12px;">
         <div style="background: #ffffff; border: 1px solid #dbe3ee; border-radius: 16px; overflow: hidden;">
@@ -636,67 +660,75 @@ export const sendOwnerDailySummary = async () => {
     </div>
   `;
 
-  const textAppointments = appointments
-    .map((appointment) => {
-      const client = appointment.clientId as any;
-      const vehicle = appointment.vehicleId as any;
-      const clientName =
-        `${client?.firstName || ''} ${client?.lastName || ''}`.trim() || 'Cliente';
-      const vehicleLabel = [vehicle?.make, vehicle?.model, vehicle?.plateNormalized]
-        .filter(Boolean)
-        .join(' ');
-      const slot = new Date(appointment.startAt).toLocaleTimeString('es-AR', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: true,
-      });
-      const statusLabel = mapAppointmentStatusToLabel(appointment.status);
-      return `- ${slot} ${clientName}${vehicleLabel ? ` (${vehicleLabel})` : ''} [${statusLabel}]`;
-    })
-    .join('\n');
+    const textAppointments = appointments
+      .map((appointment) => {
+        const client = appointment.clientId as any;
+        const vehicle = appointment.vehicleId as any;
+        const clientName =
+          `${client?.firstName || ''} ${client?.lastName || ''}`.trim() || 'Cliente';
+        const vehicleLabel = [vehicle?.make, vehicle?.model, vehicle?.plateNormalized]
+          .filter(Boolean)
+          .join(' ');
+        const slot = new Date(appointment.startAt).toLocaleTimeString('es-AR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: true,
+        });
+        const statusLabel = mapAppointmentStatusToLabel(appointment.status);
+        return `- ${slot} ${clientName}${vehicleLabel ? ` (${vehicleLabel})` : ''} [${statusLabel}]`;
+      })
+      .join('\n');
 
-  const textPending = pendingRequests
-    .map((request) => {
-      const vehicleLabel = [
-        request.vehicleData?.make,
-        request.vehicleData?.model,
-        request.vehicleData?.plateNormalized,
-      ]
-        .filter(Boolean)
-        .join(' ');
-      const suggested = (request.suggestedDates || [])
-        .slice(0, 3)
-        .map((date: Date) => new Date(date).toLocaleDateString('es-AR'))
-        .join(', ');
-      return `- ${request.clientName}${vehicleLabel ? ` (${vehicleLabel})` : ''} - ${mapRequestTypeToLabel(request.requestType)}${suggested ? ` - Sugiere: ${suggested}` : ''}`;
-    })
-    .join('\n');
+    const textPending = pendingRequests
+      .map((request) => {
+        const vehicleLabel = [
+          request.vehicleData?.make,
+          request.vehicleData?.model,
+          request.vehicleData?.plateNormalized,
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const suggested = (request.suggestedDates || [])
+          .slice(0, 3)
+          .map((date: Date) => new Date(date).toLocaleDateString('es-AR'))
+          .join(', ');
+        return `- ${request.clientName}${vehicleLabel ? ` (${vehicleLabel})` : ''} - ${mapRequestTypeToLabel(request.requestType)}${suggested ? ` - Sugiere: ${suggested}` : ''}`;
+      })
+      .join('\n');
 
-  const text = [
-    `Resumen diario - ${dayLabel}`,
-    `Turnos de hoy: ${appointments.length}`,
-    `Confirmados: ${statusTotals.confirmed} | En proceso: ${statusTotals.inProgress} | Programados: ${statusTotals.scheduled}`,
-    '',
-    'Agenda de hoy:',
-    textAppointments || '- Sin turnos para hoy',
-    '',
-    `Solicitudes pendientes (${pendingRequests.length}):`,
-    textPending || '- No hay solicitudes pendientes',
-  ].join('\n');
+    const text = [
+      `Resumen diario - ${dayLabel}`,
+      `Turnos de hoy: ${appointments.length}`,
+      `Confirmados: ${statusTotals.confirmed} | En proceso: ${statusTotals.inProgress} | Programados: ${statusTotals.scheduled}`,
+      '',
+      'Agenda de hoy:',
+      textAppointments || '- Sin turnos para hoy',
+      '',
+      `Solicitudes pendientes (${pendingRequests.length}):`,
+      textPending || '- No hay solicitudes pendientes',
+    ].join('\n');
 
-  await sendEmail({
-    to: ownerEmail,
-    subject: `Resumen diario del taller - ${dayLabel}`,
-    html,
-    text,
-  });
+    await sendEmail({
+      to: ownerEmail,
+      subject: `Resumen diario del taller - ${dayLabel}`,
+      html,
+      text,
+    });
 
-  return {
-    sent: true,
-    ownerEmail,
-    appointments: appointments.length,
-    pendingRequests: pendingRequests.length,
-  };
+    return {
+      sent: true,
+      ownerEmail,
+      dayKey: summaryDayKey,
+      appointments: appointments.length,
+      pendingRequests: pendingRequests.length,
+    };
+  } catch (error) {
+    await CronExecution.deleteOne({
+      job: 'owner-daily-summary',
+      dayKey: summaryDayKey,
+    });
+    throw error;
+  }
 };
 
 export const sendMonthlyPrepaidReminders = async () => {
