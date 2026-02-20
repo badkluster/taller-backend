@@ -79,6 +79,12 @@ const toWorkshopDayKey = (dateValue: Date | string) => {
   return `${year}-${month}-${day}`;
 };
 
+const addDaysToWorkshopDayKey = (dayKey: string, days: number) => {
+  const noonAtWorkshopDay = new Date(`${dayKey}T12:00:00${WORKSHOP_UTC_OFFSET}`);
+  noonAtWorkshopDay.setUTCDate(noonAtWorkshopDay.getUTCDate() + days);
+  return toWorkshopDayKey(noonAtWorkshopDay);
+};
+
 const buildWorkshopDateTime = (dayKey: string, slot: string) =>
   new Date(`${dayKey}T${slot}:00${WORKSHOP_UTC_OFFSET}`);
 
@@ -213,9 +219,6 @@ const escapeHtml = (value: string) =>
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
 
-const toLocalDateKey = (date: Date) =>
-  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
-
 const toLocalMonthKey = (date: Date) =>
   `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 
@@ -272,8 +275,9 @@ export const rescheduleOverdueAppointments = async () => {
     }
 
     const workOrder = await WorkOrder.findOne({ appointmentId: appointment._id });
+    const normalizedWorkOrderStatus = String(workOrder?.status || '').toUpperCase();
     const inactiveStatuses = new Set(['COMPLETADA', 'CANCELADA', 'CLOSED']);
-    const hasActiveWorkOrder = !!workOrder && !inactiveStatuses.has(workOrder.status);
+    const hasActiveWorkOrder = !!workOrder && !inactiveStatuses.has(normalizedWorkOrderStatus);
 
     if (!hasActiveWorkOrder) {
       appointment.status = 'NO_SHOW';
@@ -283,8 +287,20 @@ export const rescheduleOverdueAppointments = async () => {
       continue;
     }
 
+    const startedWorkOrderStatuses = new Set(['EN_PROCESO', 'IN_PROGRESS', 'COMPLETADA', 'CLOSED']);
+    const hasStartedWorkOrder =
+      !!workOrder &&
+      (!!workOrder.workStartedAt || startedWorkOrderStatuses.has(normalizedWorkOrderStatus));
+
+    if (!hasStartedWorkOrder) {
+      appointment.status = 'NO_SHOW';
+      appointment.cancelReason = appointment.cancelReason || 'No asistió';
+      await appointment.save();
+      results.noShow += 1;
+      continue;
+    }
+
     const normalizedServiceType = String(appointment.serviceType || '').toUpperCase();
-    const normalizedWorkOrderStatus = String(workOrder.status || '').toUpperCase();
     const isBudgetStageWorkOrder = ['PRESUPUESTO', 'OPEN'].includes(normalizedWorkOrderStatus);
     const isRepairAppointment = normalizedServiceType === 'REPARACION';
 
@@ -346,27 +362,10 @@ export const sendDayBeforeAppointmentReminders = async () => {
   const lookaheadDaysRaw = Number(process.env.APPOINTMENT_REMINDER_LOOKAHEAD_DAYS || 1);
   const lookaheadDays = Number.isFinite(lookaheadDaysRaw) && lookaheadDaysRaw > 0 ? lookaheadDaysRaw : 1;
 
-  const targetDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  targetDate.setDate(targetDate.getDate() + lookaheadDays);
-  const targetStart = new Date(
-    targetDate.getFullYear(),
-    targetDate.getMonth(),
-    targetDate.getDate(),
-    0,
-    0,
-    0,
-    0,
-  );
-  const targetEnd = new Date(
-    targetDate.getFullYear(),
-    targetDate.getMonth(),
-    targetDate.getDate(),
-    23,
-    59,
-    59,
-    999,
-  );
-  const targetDateKey = toLocalDateKey(targetStart);
+  const todayWorkshopDayKey = toWorkshopDayKey(now);
+  const targetDateKey = addDaysToWorkshopDayKey(todayWorkshopDayKey, lookaheadDays);
+  const targetStart = new Date(`${targetDateKey}T00:00:00.000${WORKSHOP_UTC_OFFSET}`);
+  const targetEnd = new Date(`${targetDateKey}T23:59:59.999${WORKSHOP_UTC_OFFSET}`);
 
   const appointments = await Appointment.find({
     status: 'CONFIRMED',
@@ -404,12 +403,14 @@ export const sendDayBeforeAppointmentReminders = async () => {
         .filter(Boolean)
         .join(' ');
       const dateLabel = new Date(appointment.startAt).toLocaleDateString('es-AR', {
+        timeZone: WORKSHOP_TIME_ZONE,
         weekday: 'long',
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
       });
       const timeLabel = new Date(appointment.startAt).toLocaleTimeString('es-AR', {
+        timeZone: WORKSHOP_TIME_ZONE,
         hour: '2-digit',
         minute: '2-digit',
       });
