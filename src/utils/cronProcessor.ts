@@ -188,7 +188,7 @@ const mapRequestTypeToLabel = (requestType: string) =>
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
   SCHEDULED: 'Programado',
-  CONFIRMED: 'Confirmado',
+  CONFIRMED: 'Programado',
   IN_PROGRESS: 'En proceso',
   COMPLETED: 'Completado',
   CANCELLED: 'Cancelado',
@@ -197,7 +197,7 @@ const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
 
 const APPOINTMENT_STATUS_BADGE_STYLES: Record<string, string> = {
   SCHEDULED: 'background-color: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd;',
-  CONFIRMED: 'background-color: #dcfce7; color: #166534; border: 1px solid #86efac;',
+  CONFIRMED: 'background-color: #dbeafe; color: #1d4ed8; border: 1px solid #93c5fd;',
   IN_PROGRESS: 'background-color: #fef3c7; color: #92400e; border: 1px solid #fcd34d;',
   COMPLETED: 'background-color: #ccfbf1; color: #0f766e; border: 1px solid #99f6e4;',
   CANCELLED: 'background-color: #fee2e2; color: #991b1b; border: 1px solid #fca5a5;',
@@ -414,14 +414,12 @@ export const sendDayBeforeAppointmentReminders = async () => {
         hour: '2-digit',
         minute: '2-digit',
       });
-      const appointmentStatusLabel =
-        appointment.status === 'CONFIRMED' ? 'confirmado' : 'programado';
       const subject = `Recordatorio de turno - ${shopName}`;
       const html = `
         <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.5;">
           <h2 style="margin: 0 0 12px;">Recordatorio de turno</h2>
           <p>Hola ${clientName},</p>
-          <p>Te recordamos que mañana tenés un turno ${appointmentStatusLabel} en <strong>${shopName}</strong>.</p>
+          <p>Te recordamos que mañana tenés un turno programado en <strong>${shopName}</strong>.</p>
           <p><strong>Fecha:</strong> ${dateLabel}</p>
           <p><strong>Hora:</strong> ${timeLabel}</p>
           ${vehicleLabel ? `<p><strong>Vehículo:</strong> ${vehicleLabel}</p>` : ''}
@@ -431,7 +429,7 @@ export const sendDayBeforeAppointmentReminders = async () => {
       `;
       const text = [
         `Hola ${clientName},`,
-        `Recordatorio: mañana tenés un turno ${appointmentStatusLabel} en ${shopName}.`,
+        `Recordatorio: mañana tenés un turno programado en ${shopName}.`,
         `Fecha: ${dateLabel}`,
         `Hora: ${timeLabel}`,
         vehicleLabel ? `Vehículo: ${vehicleLabel}` : '',
@@ -510,12 +508,12 @@ export const sendOwnerDailySummary = async () => {
 
     const statusTotals = appointments.reduce(
       (acc, appointment) => {
-        if (appointment.status === 'CONFIRMED') acc.confirmed += 1;
+        if (appointment.status === 'CONFIRMED') acc.scheduled += 1;
         if (appointment.status === 'IN_PROGRESS') acc.inProgress += 1;
         if (appointment.status === 'SCHEDULED') acc.scheduled += 1;
         return acc;
       },
-      { confirmed: 0, inProgress: 0, scheduled: 0 },
+      { inProgress: 0, scheduled: 0 },
     );
 
     const dayLabel = startOfToday.toLocaleDateString('es-AR', {
@@ -533,7 +531,7 @@ export const sendOwnerDailySummary = async () => {
       borderColor: string;
       textColor: string;
     }) => `
-    <td style="width: 25%; padding: 0;">
+    <td style="width: 33.33%; padding: 0;">
       <div style="padding: 12px 10px; border-radius: 12px; border: 1px solid ${params.borderColor}; background: ${params.backgroundColor}; text-align: center;">
         <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px; color: ${params.textColor}; opacity: 0.9;">
           ${params.label}
@@ -621,13 +619,6 @@ export const sendOwnerDailySummary = async () => {
                   textColor: '#0c4a6e',
                 })}
                 ${buildSummaryCard({
-                  label: 'Confirmados',
-                  value: statusTotals.confirmed,
-                  backgroundColor: '#dcfce7',
-                  borderColor: '#86efac',
-                  textColor: '#166534',
-                })}
-                ${buildSummaryCard({
                   label: 'En proceso',
                   value: statusTotals.inProgress,
                   backgroundColor: '#fef3c7',
@@ -702,7 +693,7 @@ export const sendOwnerDailySummary = async () => {
     const text = [
       `Resumen diario - ${dayLabel}`,
       `Turnos de hoy: ${appointments.length}`,
-      `Confirmados: ${statusTotals.confirmed} | En proceso: ${statusTotals.inProgress} | Programados: ${statusTotals.scheduled}`,
+      `En proceso: ${statusTotals.inProgress} | Programados: ${statusTotals.scheduled}`,
       '',
       'Agenda de hoy:',
       textAppointments || '- Sin turnos para hoy',

@@ -1187,7 +1187,7 @@ export const confirmAppointmentRequest = async (
       clientId: client._id,
       startAt: confirmedStartAt,
       endAt: confirmedStartAt,
-      status: "CONFIRMED",
+      status: "SCHEDULED",
       serviceType: mapRequestTypeToServiceType(requestDoc.requestType as RequestType),
       notes: requestDoc.description || "",
       createdBy: req.user._id,

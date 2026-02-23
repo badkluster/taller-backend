@@ -13,6 +13,8 @@ import { Estimate } from '../models/Finance';
 
 const isCompletedAppointment = (status?: string) =>
   status === 'COMPLETED' || status === 'CLOSED';
+const normalizePlannedStatus = (status?: string) =>
+  String(status || '').trim().toUpperCase() === 'CONFIRMED' ? 'SCHEDULED' : status;
 const isRepairServiceType = (serviceType?: string) =>
   String(serviceType || '').trim().toUpperCase() === 'REPARACION';
 
@@ -295,7 +297,13 @@ export const updateAppointment = async (req: Request, res: Response) => {
     appointment.serviceType = req.body.serviceType || appointment.serviceType;
     appointment.notes = req.body.notes || appointment.notes;
     appointment.assignedToUserId = req.body.assignedToUserId || appointment.assignedToUserId;
-    appointment.status = req.body.status || appointment.status;
+    const incomingStatus = normalizePlannedStatus(req.body.status);
+    if (incomingStatus) {
+      appointment.status = incomingStatus as typeof appointment.status;
+    }
+    if (appointment.status === 'CONFIRMED') {
+      appointment.status = 'SCHEDULED';
+    }
 
     const updatedAppointment = await appointment.save();
     const currentStartAtMs = updatedAppointment.startAt
