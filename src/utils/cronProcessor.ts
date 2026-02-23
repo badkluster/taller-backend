@@ -244,7 +244,7 @@ export const rescheduleOverdueAppointments = async () => {
   const targetDayKey = todayWorkshopDayKey;
 
   const overdueAppointments = await Appointment.find({
-    status: { $in: ['CONFIRMED', 'IN_PROGRESS'] },
+    status: { $in: ['SCHEDULED', 'CONFIRMED', 'IN_PROGRESS'] },
     endAt: { $lt: startOfToday },
   });
 
@@ -261,9 +261,9 @@ export const rescheduleOverdueAppointments = async () => {
   const results = { rescheduled: 0, noShow: 0, completedBudget: 0, skipped: 0 };
 
   for (const appointment of overdueAppointments) {
-    if (appointment.status === 'CONFIRMED') {
+    if (['SCHEDULED', 'CONFIRMED'].includes(appointment.status)) {
       appointment.status = 'NO_SHOW';
-      appointment.cancelReason = appointment.cancelReason || 'No visito el taller';
+      appointment.cancelReason = appointment.cancelReason || 'No asistió';
       await appointment.save();
       results.noShow += 1;
       continue;
@@ -368,7 +368,7 @@ export const sendDayBeforeAppointmentReminders = async () => {
   const targetEnd = new Date(`${targetDateKey}T23:59:59.999${WORKSHOP_UTC_OFFSET}`);
 
   const appointments = await Appointment.find({
-    status: 'CONFIRMED',
+    status: { $in: ['SCHEDULED', 'CONFIRMED'] },
     startAt: { $gte: targetStart, $lte: targetEnd },
     $or: [
       { dayBeforeReminderForDate: { $exists: false } },
@@ -414,12 +414,14 @@ export const sendDayBeforeAppointmentReminders = async () => {
         hour: '2-digit',
         minute: '2-digit',
       });
+      const appointmentStatusLabel =
+        appointment.status === 'CONFIRMED' ? 'confirmado' : 'programado';
       const subject = `Recordatorio de turno - ${shopName}`;
       const html = `
         <div style="font-family: Arial, sans-serif; color: #0f172a; line-height: 1.5;">
           <h2 style="margin: 0 0 12px;">Recordatorio de turno</h2>
           <p>Hola ${clientName},</p>
-          <p>Te recordamos que mañana tenés un turno confirmado en <strong>${shopName}</strong>.</p>
+          <p>Te recordamos que mañana tenés un turno ${appointmentStatusLabel} en <strong>${shopName}</strong>.</p>
           <p><strong>Fecha:</strong> ${dateLabel}</p>
           <p><strong>Hora:</strong> ${timeLabel}</p>
           ${vehicleLabel ? `<p><strong>Vehículo:</strong> ${vehicleLabel}</p>` : ''}
@@ -429,7 +431,7 @@ export const sendDayBeforeAppointmentReminders = async () => {
       `;
       const text = [
         `Hola ${clientName},`,
-        `Recordatorio: mañana tenés un turno confirmado en ${shopName}.`,
+        `Recordatorio: mañana tenés un turno ${appointmentStatusLabel} en ${shopName}.`,
         `Fecha: ${dateLabel}`,
         `Hora: ${timeLabel}`,
         vehicleLabel ? `Vehículo: ${vehicleLabel}` : '',
