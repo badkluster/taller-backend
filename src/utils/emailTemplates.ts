@@ -14,6 +14,9 @@ type ShopSettings = {
   bankHolderLastName?: string;
 };
 
+const WORKSHOP_TIME_ZONE =
+  process.env.WORKSHOP_TIME_ZONE || "America/Argentina/Buenos_Aires";
+
 const escapeHtml = (value?: string | null) =>
   String(value || "")
     .replace(/&/g, "&amp;")
@@ -28,6 +31,45 @@ const formatCurrency = (value: number) =>
     currency: "ARS",
     maximumFractionDigits: 0,
   }).format(value);
+
+const parseDateValue = (value: Date | string) => {
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+};
+
+const formatWorkshopDateTime = (
+  value: Date | string,
+  options: Intl.DateTimeFormatOptions = {},
+  fallback = "-",
+) => {
+  const parsed = parseDateValue(value);
+  if (!parsed) return fallback;
+  return parsed.toLocaleString("es-AR", {
+    timeZone: WORKSHOP_TIME_ZONE,
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    ...options,
+    hour12: false,
+    hourCycle: "h23",
+  });
+};
+
+const formatWorkshopDate = (
+  value: Date | string,
+  options: Intl.DateTimeFormatOptions = {},
+  fallback = "-",
+) => {
+  const parsed = parseDateValue(value);
+  if (!parsed) return fallback;
+  return parsed.toLocaleDateString("es-AR", {
+    timeZone: WORKSHOP_TIME_ZONE,
+    ...options,
+  });
+};
 
 const renderMultilineParagraphs = (value?: string | null) => {
   const normalized = String(value || "").trim();
@@ -205,12 +247,14 @@ export const appointmentCreatedTemplate = (data: {
   vehicleLabel: string;
   settings: ShopSettings;
 }) => {
+  const startAtLabel = formatWorkshopDateTime(data.startAt);
+  const endAtLabel = formatWorkshopDateTime(data.endAt);
   const body = `
     <p>Se creó un nuevo turno con los siguientes datos:</p>
     <table style="width:100%; border-collapse:collapse; font-size:14px;">
       <tr><td style="padding:6px 0; color:#64748b;">ID</td><td style="padding:6px 0; font-weight:700;">${data.appointmentId}</td></tr>
-      <tr><td style="padding:6px 0; color:#64748b;">Fecha</td><td style="padding:6px 0;">${new Date(data.startAt).toLocaleString()}</td></tr>
-      <tr><td style="padding:6px 0; color:#64748b;">Fin</td><td style="padding:6px 0;">${new Date(data.endAt).toLocaleString()}</td></tr>
+      <tr><td style="padding:6px 0; color:#64748b;">Fecha</td><td style="padding:6px 0;">${startAtLabel}</td></tr>
+      <tr><td style="padding:6px 0; color:#64748b;">Fin</td><td style="padding:6px 0;">${endAtLabel}</td></tr>
       <tr><td style="padding:6px 0; color:#64748b;">Servicio</td><td style="padding:6px 0;">${data.serviceType}</td></tr>
       <tr><td style="padding:6px 0; color:#64748b;">Cliente</td><td style="padding:6px 0;">${data.clientName}</td></tr>
       <tr><td style="padding:6px 0; color:#64748b;">Vehículo</td><td style="padding:6px 0;">${data.vehicleLabel}</td></tr>
@@ -223,7 +267,7 @@ export const appointmentCreatedTemplate = (data: {
   return {
     subject: `Nuevo turno creado - ${data.vehicleLabel}`,
     html: baseLayout("Nuevo turno creado", body, data.settings),
-    text: `Nuevo turno creado\nID: ${data.appointmentId}\nFecha: ${new Date(data.startAt).toLocaleString()}\nCliente: ${data.clientName}\nVehículo: ${data.vehicleLabel}\nServicio: ${data.serviceType}\n${data.notes ? `Notas: ${data.notes}` : ""}`,
+    text: `Nuevo turno creado\nID: ${data.appointmentId}\nFecha: ${startAtLabel}\nCliente: ${data.clientName}\nVehículo: ${data.vehicleLabel}\nServicio: ${data.serviceType}\n${data.notes ? `Notas: ${data.notes}` : ""}`,
   };
 };
 
@@ -244,20 +288,8 @@ export const appointmentClientNotificationTemplate = (data: {
   const safeServiceType = escapeHtml(data.serviceType || "General");
   const safeNotes = escapeHtml(String(data.notes || "").trim());
 
-  const formatDateTime = (value: Date | string) => {
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return "-";
-    return parsed.toLocaleString("es-AR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
-
-  const startAtLabel = formatDateTime(data.startAt);
-  const endAtLabel = formatDateTime(data.endAt);
+  const startAtLabel = formatWorkshopDateTime(data.startAt);
+  const endAtLabel = formatWorkshopDateTime(data.endAt);
   const intro = isRescheduled
     ? "Actualizamos la fecha y hora de tu turno."
     : "Te confirmamos el turno agendado para tu vehículo.";
@@ -343,7 +375,7 @@ export const estimateEmailTemplate = (data: {
     : null;
   const validUntilText =
     validUntilDate && !Number.isNaN(validUntilDate.getTime())
-      ? `Vigente hasta el ${validUntilDate.toLocaleDateString("es-AR")}.`
+      ? `Vigente hasta el ${formatWorkshopDate(validUntilDate)}.`
       : `Vigente por ${resolvedValidityDays} días desde su emisión.`;
 
   const body = `
@@ -510,11 +542,12 @@ export const appointmentRequestConfirmedTemplate = (data: {
   googleCalendarUrl?: string;
   settings: ShopSettings;
 }) => {
+  const confirmedAtLabel = formatWorkshopDateTime(data.confirmedAt);
   const body = `
     <p>Hola ${data.clientName},</p>
     <p>Tu solicitud fue <strong>confirmada</strong>.</p>
     <table style="width:100%; border-collapse:collapse; font-size:14px;">
-      <tr><td style="padding:6px 0; color:#64748b;">Fecha y hora</td><td style="padding:6px 0; font-weight:700;">${new Date(data.confirmedAt).toLocaleString()}</td></tr>
+      <tr><td style="padding:6px 0; color:#64748b;">Fecha y hora</td><td style="padding:6px 0; font-weight:700;">${confirmedAtLabel}</td></tr>
       <tr><td style="padding:6px 0; color:#64748b;">Vehículo</td><td style="padding:6px 0;">${data.vehicleLabel}</td></tr>
       ${data.settings.address ? `<tr><td style="padding:6px 0; color:#64748b;">Dirección</td><td style="padding:6px 0;">${data.settings.address}</td></tr>` : ""}
     </table>
@@ -539,7 +572,7 @@ export const appointmentRequestConfirmedTemplate = (data: {
   return {
     subject: `Solicitud confirmada - ${data.vehicleLabel}`,
     html: baseLayout("Solicitud confirmada", body, data.settings),
-    text: `Hola ${data.clientName}\nTu solicitud fue confirmada.\nFecha y hora: ${new Date(data.confirmedAt).toLocaleString()}\nVehículo: ${data.vehicleLabel}\n${data.settings.address ? `Dirección: ${data.settings.address}\n` : ""}${data.googleCalendarUrl ? `Agregar a Google Calendar: ${data.googleCalendarUrl}` : ""}`,
+    text: `Hola ${data.clientName}\nTu solicitud fue confirmada.\nFecha y hora: ${confirmedAtLabel}\nVehículo: ${data.vehicleLabel}\n${data.settings.address ? `Dirección: ${data.settings.address}\n` : ""}${data.googleCalendarUrl ? `Agregar a Google Calendar: ${data.googleCalendarUrl}` : ""}`,
   };
 };
 
@@ -614,7 +647,7 @@ export const appointmentCancelledTemplate = (data: {
   const scheduledAtDate = data.scheduledAt ? new Date(data.scheduledAt) : null;
   const scheduledAtText =
     scheduledAtDate && !Number.isNaN(scheduledAtDate.getTime())
-      ? scheduledAtDate.toLocaleString("es-AR")
+      ? formatWorkshopDateTime(scheduledAtDate)
       : "";
 
   const body = `
@@ -679,11 +712,11 @@ export const ownerNewAppointmentRequestTemplate = (data: {
 
   const dateLabels = data.suggestedDates
     .map((date) =>
-      new Date(date).toLocaleDateString("es-AR", {
+      formatWorkshopDate(date, {
         weekday: "short",
         day: "2-digit",
         month: "2-digit",
-      }),
+      }, ""),
     )
     .filter(Boolean);
 
@@ -823,15 +856,7 @@ export const clientPrepaidSummaryEmailTemplate = (data: {
   };
 
   const formatMovementDate = (value: Date | string) => {
-    const parsed = new Date(value);
-    if (Number.isNaN(parsed.getTime())) return "-";
-    return parsed.toLocaleString("es-AR", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
+    return formatWorkshopDateTime(value);
   };
 
   const resolveIsCredit = (movement: {

@@ -107,6 +107,8 @@ const resolveOwnerNotificationEmail = (settings?: { emailFrom?: string | null })
   process.env.SMTP_USER;
 
 const WORKSHOP_UTC_OFFSET = process.env.WORKSHOP_UTC_OFFSET || "-03:00";
+const WORKSHOP_TIME_ZONE =
+  process.env.WORKSHOP_TIME_ZONE || "America/Argentina/Buenos_Aires";
 
 const parseSuggestedDate = (rawDate: string) => {
   if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
@@ -937,7 +939,9 @@ export const createAppointmentRequest = async (req: Request, res: Response) => {
     if (!body.updateExistingPending) {
       const pendingDateLabel = new Date(
         existingPendingRequest.createdAt || new Date(),
-      ).toLocaleDateString("es-AR");
+      ).toLocaleDateString("es-AR", {
+        timeZone: WORKSHOP_TIME_ZONE,
+      });
       const pendingMessage = isQuickEstimate
         ? `Ya tenés un presupuesto rápido pendiente del ${pendingDateLabel}. ¿Querés actualizarlo?`
         : `Ya tenés una solicitud pendiente del ${pendingDateLabel}. ¿Querés actualizar fechas?`;
@@ -1253,7 +1257,7 @@ export const confirmAppointmentRequest = async (
   const shopAddress = settings?.address ? `\nDirección: ${settings.address}` : "";
   const whatsappMessage = isQuickEstimate
     ? `Hola ${requestDoc.clientName}, tu solicitud de presupuesto rápido fue aceptada.\nGeneramos una orden de presupuesto para tu vehículo ${vehicleLabel}.\n${shopName}${shopAddress}`
-    : `Hola ${requestDoc.clientName}, tu solicitud fue confirmada.\nFecha: ${confirmedStartAt.toLocaleDateString()}\nHora: ${confirmedStartAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}${shopAddress}\n${shopName}`;
+    : `Hola ${requestDoc.clientName}, tu solicitud fue confirmada.\nFecha: ${confirmedStartAt.toLocaleDateString("es-AR", { timeZone: WORKSHOP_TIME_ZONE })}\nHora: ${confirmedStartAt.toLocaleTimeString("es-AR", { timeZone: WORKSHOP_TIME_ZONE, hour: "2-digit", minute: "2-digit", hour12: false, hourCycle: "h23" })}${shopAddress}\n${shopName}`;
   const whatsAppUrl = buildWhatsAppUrl(requestDoc.phone, whatsappMessage);
 
   res.json({

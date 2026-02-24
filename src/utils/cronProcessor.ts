@@ -16,14 +16,18 @@ const buildReminderMessage = (params: {
   appointmentDate: Date;
 }) => {
   const dateLabel = params.appointmentDate.toLocaleDateString('es-AR', {
+    timeZone: WORKSHOP_TIME_ZONE,
     weekday: 'long',
     day: '2-digit',
     month: '2-digit',
     year: 'numeric',
   });
   const timeLabel = params.appointmentDate.toLocaleTimeString('es-AR', {
+    timeZone: WORKSHOP_TIME_ZONE,
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false,
+    hourCycle: 'h23',
   });
 
   return `Hola ${params.clientName}, te recordamos tu turno en Taller Suarez para el ${dateLabel} a las ${timeLabel}. Si necesitás reprogramar, respondé este mensaje.`;
@@ -139,11 +143,14 @@ export const processReminders = async () => {
       }
 
       const dateLabel = new Date(appointment.startAt).toLocaleString('es-AR', {
+        timeZone: WORKSHOP_TIME_ZONE,
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
         hour: '2-digit',
         minute: '2-digit',
+        hour12: false,
+        hourCycle: 'h23',
       });
 
       await sendEmail({
@@ -434,6 +441,8 @@ export const sendDayBeforeAppointmentReminders = async () => {
         timeZone: WORKSHOP_TIME_ZONE,
         hour: '2-digit',
         minute: '2-digit',
+        hour12: false,
+        hourCycle: 'h23',
       });
       const subject = `Recordatorio de turno - ${shopName}`;
       const html = `
@@ -582,9 +591,11 @@ export const sendOwnerDailySummary = async () => {
           .filter(Boolean)
           .join(' ');
         const slot = new Date(appointment.startAt).toLocaleTimeString('es-AR', {
+          timeZone: WORKSHOP_TIME_ZONE,
           hour: '2-digit',
           minute: '2-digit',
-          hour12: true,
+          hour12: false,
+          hourCycle: 'h23',
         });
         const statusLabel = mapAppointmentStatusToLabel(appointment.status);
         const statusStyle = resolveAppointmentStatusBadgeStyle(appointment.status);
@@ -614,7 +625,11 @@ export const sendOwnerDailySummary = async () => {
           .join(' ');
         const suggested = (request.suggestedDates || [])
           .slice(0, 3)
-          .map((date: Date) => new Date(date).toLocaleDateString('es-AR'))
+          .map((date: Date) =>
+            new Date(date).toLocaleDateString('es-AR', {
+              timeZone: WORKSHOP_TIME_ZONE,
+            }),
+          )
           .join(', ');
 
         return `
@@ -693,9 +708,11 @@ export const sendOwnerDailySummary = async () => {
           .filter(Boolean)
           .join(' ');
         const slot = new Date(appointment.startAt).toLocaleTimeString('es-AR', {
+          timeZone: WORKSHOP_TIME_ZONE,
           hour: '2-digit',
           minute: '2-digit',
-          hour12: true,
+          hour12: false,
+          hourCycle: 'h23',
         });
         const statusLabel = mapAppointmentStatusToLabel(appointment.status);
         return `- ${slot} ${clientName}${vehicleLabel ? ` (${vehicleLabel})` : ''} [${statusLabel}]`;
@@ -713,7 +730,11 @@ export const sendOwnerDailySummary = async () => {
           .join(' ');
         const suggested = (request.suggestedDates || [])
           .slice(0, 3)
-          .map((date: Date) => new Date(date).toLocaleDateString('es-AR'))
+          .map((date: Date) =>
+            new Date(date).toLocaleDateString('es-AR', {
+              timeZone: WORKSHOP_TIME_ZONE,
+            }),
+          )
           .join(', ');
         return `- ${request.clientName}${vehicleLabel ? ` (${vehicleLabel})` : ''} - ${mapRequestTypeToLabel(request.requestType)}${suggested ? ` - Sugiere: ${suggested}` : ''}`;
       })
@@ -913,7 +934,9 @@ export const processMaintenanceReminders = async () => {
         .filter(Boolean)
         .join(' ');
       const dateLabel = wo.maintenanceDate
-        ? new Date(wo.maintenanceDate).toLocaleDateString()
+        ? new Date(wo.maintenanceDate).toLocaleDateString('es-AR', {
+            timeZone: WORKSHOP_TIME_ZONE,
+          })
         : 'próximamente';
 
       const subject = `Aviso de mantenimiento${vehicleLabel ? ` - ${vehicleLabel}` : ''}`;
