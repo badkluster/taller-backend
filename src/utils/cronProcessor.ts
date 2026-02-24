@@ -397,6 +397,27 @@ export const sendDayBeforeAppointmentReminders = async () => {
         continue;
       }
 
+      // Claim reminder atomically to avoid duplicate sends across concurrent runners.
+      const claim = await Appointment.updateOne(
+        {
+          _id: appointment._id,
+          $or: [
+            { dayBeforeReminderForDate: { $exists: false } },
+            { dayBeforeReminderForDate: { $ne: targetDateKey } },
+          ],
+        },
+        {
+          $set: {
+            dayBeforeReminderSentAt: now,
+            dayBeforeReminderForDate: targetDateKey,
+          },
+        },
+      );
+      if (!claim.modifiedCount) {
+        results.skipped += 1;
+        continue;
+      }
+
       const clientName =
         `${client?.firstName || ''} ${client?.lastName || ''}`.trim() || 'Cliente';
       const vehicleLabel = [vehicle?.make, vehicle?.model, vehicle?.plateNormalized]
@@ -444,12 +465,20 @@ export const sendDayBeforeAppointmentReminders = async () => {
         html,
         text,
       });
-
-      appointment.dayBeforeReminderSentAt = now;
-      appointment.dayBeforeReminderForDate = targetDateKey;
-      await appointment.save();
       results.sent += 1;
     } catch (error) {
+      await Appointment.updateOne(
+        {
+          _id: appointment._id,
+          dayBeforeReminderForDate: targetDateKey,
+        },
+        {
+          $unset: {
+            dayBeforeReminderSentAt: '',
+            dayBeforeReminderForDate: '',
+          },
+        },
+      );
       results.failed += 1;
     }
   }

@@ -66,6 +66,7 @@ const MailerModule = mailer as any;
 const originals = {
   appointmentFind: AppointmentModel.find,
   appointmentFindById: AppointmentModel.findById,
+  appointmentUpdateOne: AppointmentModel.updateOne,
   appointmentRequestFind: AppointmentRequestModel.find,
   clientFind: ClientModel.find,
   cronExecutionCreate: CronExecutionModel.create,
@@ -80,6 +81,7 @@ const originals = {
 const restoreOriginals = () => {
   AppointmentModel.find = originals.appointmentFind;
   AppointmentModel.findById = originals.appointmentFindById;
+  AppointmentModel.updateOne = originals.appointmentUpdateOne;
   AppointmentRequestModel.find = originals.appointmentRequestFind;
   ClientModel.find = originals.clientFind;
   CronExecutionModel.create = originals.cronExecutionCreate;
@@ -239,6 +241,11 @@ const runDayBeforeReminderScenario = async () => {
 
   const sentEmails: AnyDoc[] = [];
   let reminderQuery: AnyDoc = {};
+  const remindersById: Record<string, AnyDoc> = {
+    [scheduled._id]: scheduled,
+    [confirmed._id]: confirmed,
+    [missingEmail._id]: missingEmail,
+  };
 
   SettingsModel.findOne = async () => ({
     shopName: 'Taller Test',
@@ -248,6 +255,34 @@ const runDayBeforeReminderScenario = async () => {
   AppointmentModel.find = (query: AnyDoc) => {
     reminderQuery = query;
     return makeQuery([scheduled, confirmed, missingEmail]);
+  };
+  AppointmentModel.updateOne = async (query: AnyDoc, update: AnyDoc) => {
+    const doc = remindersById[String(query?._id || '')];
+    if (!doc) return { matchedCount: 0, modifiedCount: 0 };
+
+    if (update?.$set) {
+      const targetDate = update.$set.dayBeforeReminderForDate;
+      if (doc.dayBeforeReminderForDate === targetDate) {
+        return { matchedCount: 1, modifiedCount: 0 };
+      }
+      doc.dayBeforeReminderForDate = targetDate;
+      doc.dayBeforeReminderSentAt = update.$set.dayBeforeReminderSentAt;
+      return { matchedCount: 1, modifiedCount: 1 };
+    }
+
+    if (update?.$unset) {
+      if (
+        query?.dayBeforeReminderForDate &&
+        doc.dayBeforeReminderForDate !== query.dayBeforeReminderForDate
+      ) {
+        return { matchedCount: 1, modifiedCount: 0 };
+      }
+      delete doc.dayBeforeReminderForDate;
+      delete doc.dayBeforeReminderSentAt;
+      return { matchedCount: 1, modifiedCount: 1 };
+    }
+
+    return { matchedCount: 0, modifiedCount: 0 };
   };
   MailerModule.sendEmail = async (payload: AnyDoc) => {
     sentEmails.push(payload);
@@ -260,8 +295,8 @@ const runDayBeforeReminderScenario = async () => {
   assert.equal(results.failed, 0);
   assert.ok(typeof results.targetDate === 'string' && results.targetDate.length > 0);
 
-  assert.equal(scheduled.saveCalls, 1);
-  assert.equal(confirmed.saveCalls, 1);
+  assert.equal(scheduled.saveCalls, 0);
+  assert.equal(confirmed.saveCalls, 0);
   assert.equal(missingEmail.saveCalls, 0);
   assert.equal(scheduled.dayBeforeReminderForDate, results.targetDate);
   assert.equal(confirmed.dayBeforeReminderForDate, results.targetDate);
@@ -269,6 +304,12 @@ const runDayBeforeReminderScenario = async () => {
   assert.equal(sentEmails.length, 2);
   assert.ok(String(sentEmails[0].text).includes('turno programado'));
   assert.ok(String(sentEmails[1].text).includes('turno programado'));
+
+  const secondRun = await sendDayBeforeAppointmentReminders();
+  assert.equal(secondRun.sent, 0);
+  assert.equal(secondRun.failed, 0);
+  assert.equal(secondRun.skipped, 3);
+  assert.equal(sentEmails.length, 2);
 
   const reminderStatuses = reminderQuery?.status?.$in || [];
   assert.ok(reminderStatuses.includes('SCHEDULED'));

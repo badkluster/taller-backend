@@ -14,6 +14,7 @@ const ensureDatabase = async () => {
 
 const ensureAgenda = async () => {
   if (isAgendaStarted) return;
+  if (process.env.AGENDA_START_IN_API !== 'true') return;
 
   try {
     await startAgenda();

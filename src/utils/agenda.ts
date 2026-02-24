@@ -77,13 +77,13 @@ export const startAgenda = async () => {
   const tz = process.env.AGENDA_TZ || "America/Argentina/Buenos_Aires";
   const runningOnVercel = process.env.VERCEL === "1";
 
-  await instance.every(
-    cron,
-    "maintenance-reminders",
-    {},
-    { timezone: tz, skipImmediate: true },
-  );
   if (!runningOnVercel) {
+    await instance.every(
+      cron,
+      "maintenance-reminders",
+      {},
+      { timezone: tz, skipImmediate: true },
+    );
     await instance.every(
       remindersCron,
       "appointment-reminders",
