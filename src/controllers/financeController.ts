@@ -16,6 +16,10 @@ import {
   invoiceEmailTemplate,
   prepaidOfferEmailTemplate,
 } from '../utils/emailTemplates';
+import {
+  buildInvoiceSequenceKey,
+  normalizeInvoiceSeriesPrefix,
+} from '../utils/invoiceSeriesPrefix';
 import { resolveLogoBuffer } from '../utils/branding';
 import cloudinary from '../config/cloudinary';
 
@@ -636,8 +640,16 @@ export const createInvoice = async (req: Request, res: Response) => {
   }
 
   const total = toMoney(Math.max(0, baseTotal - prepaidApplied));
+  const settings = await Settings.findOne();
+  const invoiceSeriesPrefix = normalizeInvoiceSeriesPrefix(
+    settings?.invoiceSeriesPrefix,
+  );
 
-  const number = await getNextDocumentNumber(Invoice as any, 'invoice_number', 'A-');
+  const number = await getNextDocumentNumber(
+    Invoice as any,
+    buildInvoiceSequenceKey(invoiceSeriesPrefix),
+    invoiceSeriesPrefix,
+  );
 
   const invoice = await Invoice.create({
     vehicleId: workOrder.vehicleId,
@@ -677,8 +689,7 @@ export const createInvoice = async (req: Request, res: Response) => {
   }
 
   try {
-    const [settings, vehicle, client] = await Promise.all([
-      Settings.findOne(),
+    const [vehicle, client] = await Promise.all([
       Vehicle.findById(workOrder.vehicleId),
       Client.findById(workOrder.clientId),
     ]);
@@ -1405,7 +1416,14 @@ export const createClientPrepaidDeposit = async (req: Request, res: Response) =>
     createdBy,
   });
 
-  const number = await getNextDocumentNumber(Invoice as any, 'invoice_number', 'A-');
+  const invoiceSeriesPrefix = normalizeInvoiceSeriesPrefix(
+    settings?.invoiceSeriesPrefix,
+  );
+  const number = await getNextDocumentNumber(
+    Invoice as any,
+    buildInvoiceSequenceKey(invoiceSeriesPrefix),
+    invoiceSeriesPrefix,
+  );
   const invoice = await Invoice.create({
     clientId: client._id,
     number,

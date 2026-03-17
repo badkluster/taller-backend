@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import Settings from "../models/Settings";
 import { processMaintenanceReminders } from "../utils/cronProcessor";
 import WorkOrder from "../models/WorkOrder";
+import { normalizeInvoiceSeriesPrefix } from "../utils/invoiceSeriesPrefix";
 import { sanitizeLogoUrlInput } from "../utils/branding";
 
 const DEFAULT_ESTIMATE_VALIDITY_DAYS = 15;
@@ -91,9 +92,19 @@ export const getSettings = async (req: Request, res: Response) => {
       const normalizedLogoUrl = sanitizeLogoUrlInput(
         (settings as any).logoUrl,
       );
+      const normalizedInvoiceSeriesPrefix = normalizeInvoiceSeriesPrefix(
+        (settings as any).invoiceSeriesPrefix,
+      );
       const logoValueToPersist = normalizedLogoUrl || "";
       if (String((settings as any).logoUrl || "") !== logoValueToPersist) {
         settings.logoUrl = logoValueToPersist;
+        shouldSave = true;
+      }
+      if (
+        String((settings as any).invoiceSeriesPrefix || "") !==
+        normalizedInvoiceSeriesPrefix
+      ) {
+        settings.invoiceSeriesPrefix = normalizedInvoiceSeriesPrefix;
         shouldSave = true;
       }
       if (shouldSave) {
@@ -121,7 +132,9 @@ export const updateSettings = async (req: Request, res: Response) => {
       if (req.body.emailFrom !== undefined) settings.emailFrom = req.body.emailFrom;
       if (req.body.workingHours !== undefined) settings.workingHours = req.body.workingHours;
       if (req.body.invoiceSeriesPrefix !== undefined) {
-        settings.invoiceSeriesPrefix = req.body.invoiceSeriesPrefix;
+        settings.invoiceSeriesPrefix = normalizeInvoiceSeriesPrefix(
+          req.body.invoiceSeriesPrefix,
+        );
       }
       if (req.body.logoUrl !== undefined) {
         settings.logoUrl = sanitizeLogoUrlInput(req.body.logoUrl) || "";
@@ -224,6 +237,9 @@ export const updateSettings = async (req: Request, res: Response) => {
       }
       const newSettings = await Settings.create({
         ...req.body,
+        invoiceSeriesPrefix: normalizeInvoiceSeriesPrefix(
+          req.body.invoiceSeriesPrefix,
+        ),
         estimateValidityDays: normalizedDays,
         prepaidReminderDay: normalizedReminderDay,
         logoUrl: sanitizeLogoUrlInput(req.body.logoUrl) || "",

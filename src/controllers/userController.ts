@@ -1,6 +1,11 @@
 import { Request, Response } from 'express';
 import User from '../models/User';
 
+const normalizeUserEmail = (value: unknown) =>
+  String(value || '')
+    .trim()
+    .toLowerCase();
+
 // @desc    Get all users (admin)
 // @route   GET /api/users
 // @access  Private/Admin
@@ -33,13 +38,14 @@ export const getUsers = async (req: Request, res: Response) => {
 // @access  Private/Admin
 export const createUser = async (req: Request, res: Response) => {
   const { name, userName, email, password, role, isActive } = req.body;
+  const normalizedEmail = normalizeUserEmail(email);
 
-  if (!name || !email || !password || !userName) {
+  if (!name || !normalizedEmail || !password || !userName) {
     res.status(400);
     throw new Error('Nombre, usuario, email y contraseña son obligatorios');
   }
 
-  const exists = await User.findOne({ email });
+  const exists = await User.findOne({ email: normalizedEmail });
   if (exists) {
     res.status(400);
     throw new Error('Ya existe un usuario con ese email');
@@ -54,7 +60,7 @@ export const createUser = async (req: Request, res: Response) => {
   const user = await User.create({
     name,
     userName,
-    email,
+    email: normalizedEmail,
     password,
     role: role || 'employee',
     isActive: isActive !== undefined ? isActive : true,
@@ -84,13 +90,24 @@ export const updateUser = async (req: Request, res: Response) => {
     throw new Error('Usuario no encontrado');
   }
 
-  if (email && email !== user.email) {
-    const exists = await User.findOne({ email });
-    if (exists) {
+  if (email !== undefined) {
+    const normalizedEmail = normalizeUserEmail(email);
+    const currentNormalizedEmail = normalizeUserEmail(user.email);
+    if (!normalizedEmail) {
       res.status(400);
-      throw new Error('Ya existe un usuario con ese email');
+      throw new Error('El email es obligatorio');
     }
-    user.email = email;
+    if (normalizedEmail !== currentNormalizedEmail) {
+      const exists = await User.findOne({
+        email: normalizedEmail,
+        _id: { $ne: user._id },
+      });
+      if (exists) {
+        res.status(400);
+        throw new Error('Ya existe un usuario con ese email');
+      }
+    }
+    user.email = normalizedEmail;
   }
 
   if (userName && userName !== user.userName) {
