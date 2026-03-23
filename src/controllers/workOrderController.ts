@@ -333,7 +333,7 @@ export const getWorkOrders = async (req: Request, res: Response) => {
           { firstName: regex },
           { lastName: regex },
           { email: regex },
-          { phone: { $regex: regex, $options: 'i' } },
+          { phone: regex },
         ],
       }).select('_id'),
     ]);
@@ -342,9 +342,9 @@ export const getWorkOrders = async (req: Request, res: Response) => {
     const clientIds = clients.map((c) => c._id);
 
     query.$or = [
-      { workDetailsText: { $regex: regex, $options: 'i' } },
-      { internalComment: { $regex: regex, $options: 'i' } },
-      { clientComment: { $regex: regex, $options: 'i' } },
+      { workDetailsText: regex },
+      { internalComment: regex },
+      { clientComment: regex },
       ...(vehicleIds.length ? [{ vehicleId: { $in: vehicleIds } }] : []),
       ...(clientIds.length ? [{ clientId: { $in: clientIds } }] : []),
     ];

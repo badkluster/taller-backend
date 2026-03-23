@@ -569,7 +569,7 @@ export const getEstimates = async (req: Request, res: Response) => {
   if (keyword) {
     const escaped = keyword.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const regex = new RegExp(escaped, 'i');
-    query.$or = [{ number: { $regex: regex } }];
+    query.$or = [{ number: regex }];
   }
 
   const count = await Estimate.countDocuments(query);
@@ -753,7 +753,7 @@ export const getInvoices = async (req: Request, res: Response) => {
           { firstName: regex },
           { lastName: regex },
           { email: regex },
-          { phone: { $regex: regex, $options: 'i' } },
+          { phone: regex },
         ],
       }).select('_id'),
       Vehicle.find({
@@ -769,7 +769,7 @@ export const getInvoices = async (req: Request, res: Response) => {
     const vehicleIds = vehicles.map((v) => v._id);
 
     query.$or = [
-      { number: { $regex: regex } },
+      { number: regex },
       ...(clientIds.length ? [{ clientId: { $in: clientIds } }] : []),
       ...(vehicleIds.length ? [{ vehicleId: { $in: vehicleIds } }] : []),
     ];
