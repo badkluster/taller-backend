@@ -14,6 +14,7 @@ import {
   sendDayBeforeAppointmentReminders,
   sendMonthlyPrepaidReminders,
   sendOwnerDailySummary,
+  expireOutdatedAppointmentRequests,
 } from '../utils/cronProcessor';
 
 type AnyDoc = Record<string, any>;
@@ -354,15 +355,20 @@ const runOwnerDailySummaryScenario = async () => {
         vehicleId: { make: 'Renault', model: 'Clio', plateNormalized: 'CC333CC' },
       }),
     ]);
-  AppointmentRequestModel.find = () =>
-    makeQuery([
+  AppointmentRequestModel.find = (query: AnyDoc) => {
+    if (query?.requestType?.$in) {
+      return makeQuery([]);
+    }
+
+    return makeQuery([
       {
         clientName: 'Pendiente Uno',
         requestType: 'repair',
         vehicleData: { make: 'Peugeot', model: '208', plateNormalized: 'DD444DD' },
-        suggestedDates: [new Date('2026-02-24T12:00:00.000Z')],
+        suggestedDates: [new Date('2099-02-24T12:00:00.000Z')],
       },
     ]);
+  };
   MailerModule.sendEmail = async (payload: AnyDoc) => {
     sentEmails.push(payload);
     return { messageId: 'owner-summary' };
@@ -385,6 +391,57 @@ const runOwnerDailySummaryScenario = async () => {
   const duplicate = await sendOwnerDailySummary();
   assert.equal(duplicate.sent, false);
   assert.equal(duplicate.reason, 'ALREADY_SENT_FOR_DAY');
+};
+
+const runExpiredAppointmentRequestsScenario = async () => {
+  const sentEmails: AnyDoc[] = [];
+  const expiredWithEmail = makeDoc({
+    _id: 'expired-with-email',
+    clientName: 'Cliente Con Correo',
+    email: 'cliente@example.com',
+    requestType: 'repair',
+    vehicleData: { make: 'Fiat', model: 'Cronos', plateNormalized: 'AA111BB' },
+    suggestedDates: [new Date('2026-07-20T15:00:00.000Z')],
+    status: 'PENDING',
+  });
+  const expiredWithoutEmail = makeDoc({
+    _id: 'expired-without-email',
+    clientName: 'Cliente Sin Correo',
+    requestType: 'diagnosis',
+    vehicleData: { make: 'Ford', model: 'Ka', plateNormalized: 'CC222DD' },
+    suggestedDates: [new Date('2026-07-21T15:00:00.000Z')],
+    status: 'PENDING',
+  });
+
+  SettingsModel.findOne = async () => ({
+    shopName: 'Taller Test',
+    emailFrom: 'owner@example.com',
+  });
+  AppointmentRequestModel.find = (query: AnyDoc) => {
+    assert.deepEqual(query.requestType.$in, ['repair', 'diagnosis']);
+    assert.equal(query.status, 'PENDING');
+    assert.ok(query.suggestedDates.$not.$elemMatch.$gte instanceof Date);
+    return makeQuery([expiredWithEmail, expiredWithoutEmail]);
+  };
+  MailerModule.sendEmail = async (payload: AnyDoc) => {
+    sentEmails.push(payload);
+    return { messageId: 'expired-request' };
+  };
+
+  const result = await expireOutdatedAppointmentRequests(
+    new Date('2026-07-22T10:05:00.000Z'),
+  );
+
+  assert.equal(result.closed, 2);
+  assert.equal(result.clientNotificationsSent, 1);
+  assert.equal(result.clientNotificationsSkipped, 1);
+  assert.equal(result.clientNotificationsFailed, 0);
+  assert.equal(expiredWithEmail.status, 'REJECTED');
+  assert.equal(expiredWithoutEmail.status, 'REJECTED');
+  assert.equal(expiredWithEmail.saveCalls, 1);
+  assert.equal(expiredWithoutEmail.saveCalls, 1);
+  assert.equal(sentEmails.length, 1);
+  assert.ok(String(sentEmails[0].text).includes('nueva solicitud'));
 };
 
 const runMonthlyPrepaidScenario = async () => {
@@ -475,6 +532,7 @@ const main = async () => {
     await runProcessRemindersScenario();
     await runNoShowScenario();
     await runDayBeforeReminderScenario();
+    await runExpiredAppointmentRequestsScenario();
     await runOwnerDailySummaryScenario();
     await runMonthlyPrepaidScenario();
     await runMaintenanceScenario();

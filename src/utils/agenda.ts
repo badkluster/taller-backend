@@ -1,6 +1,7 @@
 import Agenda from "agenda";
 import { logger } from "./logger";
 import {
+  expireOutdatedAppointmentRequests,
   processMaintenanceReminders,
   processReminders,
   rescheduleOverdueAppointments,
@@ -31,6 +32,11 @@ const getAgenda = () => {
   agenda.define("reschedule-overdue-appointments", async () => {
     const results = await rescheduleOverdueAppointments();
     logger.info({ results }, "Reschedule overdue appointments job completed");
+  });
+
+  agenda.define("expire-outdated-appointment-requests", async () => {
+    const results = await expireOutdatedAppointmentRequests();
+    logger.info({ results }, "Expire outdated appointment requests job completed");
   });
 
   agenda.define("owner-daily-summary", async () => {
@@ -71,6 +77,8 @@ export const startAgenda = async () => {
   const dayBeforeRemindersCron =
     process.env.AGENDA_DAY_BEFORE_REMINDERS_CRON || "0 22 * * *";
   const overdueCron = process.env.AGENDA_OVERDUE_CRON || "15 0 * * *";
+  const expiredRequestsCron =
+    process.env.AGENDA_EXPIRED_REQUESTS_CRON || "0 0 * * *";
   const ownerSummaryCron = process.env.AGENDA_OWNER_SUMMARY_CRON || "5 7 * * *";
   const prepaidRemindersCron =
     process.env.AGENDA_PREPAID_REMINDER_CRON || "0 10 * * *";
@@ -103,6 +111,12 @@ export const startAgenda = async () => {
       { timezone: tz, skipImmediate: true },
     );
     await instance.every(
+      expiredRequestsCron,
+      "expire-outdated-appointment-requests",
+      {},
+      { timezone: tz, skipImmediate: true },
+    );
+    await instance.every(
       ownerSummaryCron,
       "owner-daily-summary",
       {},
@@ -121,6 +135,7 @@ export const startAgenda = async () => {
       remindersCron,
       dayBeforeRemindersCron,
       overdueCron,
+      expiredRequestsCron,
       ownerSummaryCron,
       prepaidRemindersCron,
       tz,

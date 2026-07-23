@@ -1,5 +1,6 @@
 import express from 'express';
 import {
+  expireOutdatedAppointmentRequests,
   sendDayBeforeAppointmentReminders,
   processMaintenanceReminders,
   processReminders,
@@ -37,6 +38,21 @@ router.get('/reschedule-overdue-appointments', async (req, res) => {
 
   try {
     const results = await rescheduleOverdueAppointments();
+    res.json({ success: true, results });
+  } catch (error: any) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+router.get('/expire-outdated-appointment-requests', async (req, res) => {
+  const secret = req.headers['authorization'];
+  if (secret !== `Bearer ${process.env.CRON_SECRET}`) {
+    res.status(401).json({ message: 'Unauthorized' });
+    return;
+  }
+
+  try {
+    const results = await expireOutdatedAppointmentRequests();
     res.json({ success: true, results });
   } catch (error: any) {
     res.status(500).json({ success: false, error: error.message });

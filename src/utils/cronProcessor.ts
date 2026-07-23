@@ -7,6 +7,7 @@ import CronExecution from '../models/CronExecution';
 import Settings from '../models/Settings';
 import { sendEmail } from './mailer';
 import {
+  appointmentRequestRejectedTemplate,
   prepaidPaymentInstructionsHtml,
   prepaidPaymentInstructionsText,
 } from './emailTemplates';
@@ -192,6 +193,111 @@ const resolveOwnerNotificationEmail = (settings?: { emailFrom?: string | null })
 
 const mapRequestTypeToLabel = (requestType: string) =>
   requestType === 'repair' ? 'Reparacion' : 'Diagnostico / Presupuesto';
+
+const EXPIRED_APPOINTMENT_REQUEST_REASON =
+  'Las fechas sugeridas para esta solicitud ya vencieron. Por favor, realizá una nueva solicitud indicando nuevas fechas posibles.';
+
+const resolveFrontendBaseUrl = () =>
+  String(process.env.FRONTEND_URL || process.env.APP_BASE_URL || '')
+    .trim()
+    .replace(/\/+$/, '');
+
+const buildPublicFrontendUrl = (path: string) => {
+  const base = resolveFrontendBaseUrl();
+  return base ? `${base}${path.startsWith('/') ? path : `/${path}`}` : undefined;
+};
+
+const formatRequestVehicleLabel = (vehicleData?: {
+  make?: string;
+  model?: string;
+  plateNormalized?: string;
+  plateRaw?: string;
+}) => {
+  const plate = vehicleData?.plateNormalized || vehicleData?.plateRaw || '-';
+  return `${vehicleData?.make || ''} ${vehicleData?.model || ''} (${plate})`.trim();
+};
+
+type AppointmentRequestExpiryResult = {
+  closed: number;
+  clientNotificationsSent: number;
+  clientNotificationsSkipped: number;
+  clientNotificationsFailed: number;
+};
+
+/**
+ * Closes pending appointment requests whose every suggested date has passed.
+ * Quick estimates are intentionally excluded because they do not use dates.
+ */
+export const expireOutdatedAppointmentRequests = async (
+  now = new Date(),
+  settings?: any,
+): Promise<AppointmentRequestExpiryResult> => {
+  const todayKey = toWorkshopDayKey(now);
+  const startOfToday = new Date(`${todayKey}T00:00:00.000${WORKSHOP_UTC_OFFSET}`);
+  const requests = await AppointmentRequest.find({
+    status: 'PENDING',
+    requestType: { $in: ['repair', 'diagnosis'] },
+    'suggestedDates.0': { $exists: true },
+    suggestedDates: { $not: { $elemMatch: { $gte: startOfToday } } },
+  }).sort({ createdAt: 1 });
+
+  const result: AppointmentRequestExpiryResult = {
+    closed: 0,
+    clientNotificationsSent: 0,
+    clientNotificationsSkipped: 0,
+    clientNotificationsFailed: 0,
+  };
+  const notificationSettings = settings || (await Settings.findOne());
+  const requestUrl = buildPublicFrontendUrl('/solicitar-turno');
+
+  for (const request of requests) {
+    request.status = 'REJECTED';
+    request.rejectionReason = EXPIRED_APPOINTMENT_REQUEST_REASON;
+    request.rejectedAt = now;
+    request.confirmedAppointmentId = undefined;
+    request.confirmedWorkOrderId = undefined;
+    request.confirmedAt = undefined;
+    await request.save();
+    result.closed += 1;
+
+    if (!request.email) {
+      result.clientNotificationsSkipped += 1;
+      continue;
+    }
+
+    const template = appointmentRequestRejectedTemplate({
+      clientName: request.clientName,
+      vehicleLabel: formatRequestVehicleLabel(request.vehicleData),
+      rejectionReason: EXPIRED_APPOINTMENT_REQUEST_REASON,
+      followUpText:
+        'Para avanzar con tu vehículo, podés realizar una nueva solicitud de turno con fechas actualizadas.',
+      requestUrl,
+      requestUrlLabel: 'Solicitar nuevo turno',
+      settings: {
+        shopName: notificationSettings?.shopName,
+        address: notificationSettings?.address ?? undefined,
+        phone: notificationSettings?.phone ?? undefined,
+        emailFrom: notificationSettings?.emailFrom ?? undefined,
+        logoUrl: notificationSettings?.logoUrl ?? undefined,
+      },
+    });
+
+    try {
+      await sendEmail({
+        to: request.email,
+        subject: template.subject,
+        html: template.html,
+        text: template.text,
+      });
+      result.clientNotificationsSent += 1;
+    } catch (error) {
+      console.error('Error enviando aviso de vencimiento de solicitud:', error);
+      result.clientNotificationsFailed += 1;
+    }
+  }
+
+  return result;
+};
 
 const APPOINTMENT_STATUS_LABELS: Record<string, string> = {
   SCHEDULED: 'Programado',
@@ -498,16 +604,6 @@ export const sendDayBeforeAppointmentReminders = async () => {
 export const sendOwnerDailySummary = async () => {
   const settings = await Settings.findOne();
   const ownerEmail = resolveOwnerNotificationEmail(settings || undefined);
-
-  if (!ownerEmail) {
-    return {
-      sent: false,
-      reason: 'OWNER_EMAIL_NOT_CONFIGURED',
-      appointments: 0,
-      pendingRequests: 0,
-    };
-  }
-
   const now = new Date();
   const summaryDayKey = toWorkshopDayKey(now);
 
@@ -534,6 +630,16 @@ export const sendOwnerDailySummary = async () => {
   const endOfToday = new Date(`${summaryDayKey}T23:59:59.999${WORKSHOP_UTC_OFFSET}`);
 
   try {
+    if (!ownerEmail) {
+      return {
+        sent: false,
+        reason: 'OWNER_EMAIL_NOT_CONFIGURED',
+        dayKey: summaryDayKey,
+        appointments: 0,
+        pendingRequests: 0,
+      };
+    }
+
     const [appointments, pendingRequests] = await Promise.all([
       Appointment.find({
         startAt: { $gte: startOfToday, $lte: endOfToday },
