@@ -1,5 +1,7 @@
 import mongoose from "mongoose";
 
+const LOG_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+
 const emailCampaignSchema = new mongoose.Schema(
   {
     title: { type: String, required: true },
@@ -39,6 +41,9 @@ const emailLogSchema = new mongoose.Schema(
     timestamps: true,
   },
 );
+
+// Campaign delivery history is operational logging, retained for one week.
+emailLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: LOG_RETENTION_SECONDS });
 
 export const EmailCampaign = mongoose.model(
   "EmailCampaign",

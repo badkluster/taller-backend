@@ -1,5 +1,7 @@
 import mongoose from 'mongoose';
 
+const LOG_RETENTION_SECONDS = 7 * 24 * 60 * 60;
+
 const errorLogSchema = new mongoose.Schema(
   {
     message: { type: String, required: true },
@@ -16,6 +18,9 @@ const errorLogSchema = new mongoose.Schema(
   },
   { timestamps: true },
 );
+
+// MongoDB removes expired documents automatically via its TTL monitor.
+errorLogSchema.index({ createdAt: 1 }, { expireAfterSeconds: LOG_RETENTION_SECONDS });
 
 const ErrorLog = mongoose.model('ErrorLog', errorLogSchema);
 export default ErrorLog;
